@@ -1,0 +1,20 @@
+.player{display:grid;grid-template-columns:44px 34px auto minmax(100px,1fr) auto auto auto;align-items:center;gap:10px;margin-top:22px;padding:12px;border:1px solid var(--line);background:#111618}
+.playbtn,.stopbtn{height:34px;border:1px solid #415055;background:#1c2528;color:var(--cyan);cursor:pointer;font-weight:800}
+.stopbtn{color:var(--muted)}
+.playbtn:hover,.stopbtn:hover{border-color:var(--cyan)}
+.playerTime{font:10px ui-monospace,monospace;color:#aab4b5;white-space:nowrap}
+.seek{margin:0;padding:0;accent-color:var(--cyan)}
+.metro,.volume{display:flex;align-items:center;gap:7px;margin:0;color:#aab4b5;white-space:nowrap}
+.metro input{width:auto;margin:0;accent-color:var(--orange)}
+.metro span{float:none;color:inherit}
+.metro select{width:auto;margin:0;padding:4px 6px;color:inherit}
+.volume input{width:70px;margin:0;padding:0;accent-color:var(--cyan)}
+.beatPulse{height:6px;margin-top:10px;background:#1c2528;position:relative;overflow:hidden;transition:background .08s,box-shadow .08s}
+.beatPulse span{position:absolute;right:8px;top:-1px;font:700 7px ui-monospace;color:#536064;letter-spacing:1px}
+.beatPulse.hit{background:var(--cyan);box-shadow:0 0 24px color-mix(in srgb,var(--cyan) 70%,transparent)}
+.beatPulse.heavy{background:var(--orange);box-shadow:0 0 32px color-mix(in srgb,var(--orange) 80%,transparent)}
+.beatPulse.hit span{color:#0e1517}
+.playhead{position:absolute;z-index:5;top:0;bottom:0;width:2px;background:#fff;left:0;box-shadow:0 0 10px #fff;pointer-events:none}
+.track.playing{box-shadow:inset 0 0 30px #0e2429}
+.tick.active{width:4px;filter:brightness(1.8);box-shadow:0 0 14px currentColor}
+@media(max-width:700px){.player{grid-template-columns:44px 34px 1fr auto}.seek{grid-column:1/-1;grid-row:2}.playerTime{display:none}.volume{display:none}}

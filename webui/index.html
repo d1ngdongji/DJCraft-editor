@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Beat Track Studio</title><meta name="description" content="本地音频节拍检测与游戏轨道 JSON 导出工具">
+  <link rel="icon" type="image/png" href="logo.png?v=20260729">
+  <link rel="stylesheet" href="styles.css?v=20260727"><link rel="stylesheet" href="player.css?v=20260728"><link rel="stylesheet" href="editor.css?v=20260727"><link rel="stylesheet" href="advanced-editor.css?v=20260728-3"><link rel="stylesheet" href="workbench.css?v=20260729">
+</head>
+<body>
+  <header><a class="brand"><img class="brandmark" src="logo.png?v=20260729" alt="Beat Track Studio"><span>BEAT TRACK<br><small>STUDIO</small></span></a><div class="workspaceIdentity"><strong id="workspaceTitle">自动检测</strong><span id="workspaceHint">提取节拍并预览检测结果</span></div><div class="local"><i></i> 本地运行 · 音频不会上传云端</div></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">MADMom RNN · DBN Beat Tracking</p>
+      <h1>DJCraft<em>轨道生成器</em></h1>
+      <p>从音频提取稳定节拍，自定义每一种节拍定义与时间线，导出可直接使用的 DJCraft 轨道包。</p>
+    </section>
+    <nav class="modeNav" aria-label="主要功能">
+      <button class="modeTab active" data-panel="autoPanel" aria-selected="true" aria-label="自动检测" title="自动检测"><b>01</b><span class="modeIcon">⌁</span><span class="modeCopy">自动检测<small>检测与只读预览</small></span></button>
+      <button class="modeTab" data-panel="advancedPanel" aria-selected="false" aria-label="高级编辑" title="高级编辑"><b>02</b><span class="modeIcon">▥</span><span class="modeCopy">高级编辑<small>多轨、波形与批量工具</small></span></button>
+      <button class="modeTab" data-panel="resourcesPanel" aria-selected="false" aria-label="资源管理" title="资源管理"><b>03</b><span class="modeIcon">◇</span><span class="modeCopy">资源管理<small>唱片与连击贴图</small></span></button>
+    </nav>
+    <section class="workspace modePanel" id="autoPanel">
+      <div class="left autoMain">
+        <div class="card upload" id="dropzone">
+          <input type="file" id="audio" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a">
+          <div class="uploadIcon">↥</div><h2 id="fileTitle">拖入音频，开始分析</h2>
+          <p id="fileMeta">支持 MP3、WAV、FLAC、OGG、M4A · 最大 200 MB</p>
+          <div class="uploadActions"><button class="outline" id="choose">选择音频</button></div>
+        </div>
+        <div class="card preview hidden" id="resultCard">
+          <div class="cardhead"><div><span class="label">DETECTION PREVIEW</span><h2>检测结果</h2></div><span class="method" id="method">FAST</span></div>
+          <div class="stats"><div><b id="bpm">—</b><span>BPM</span></div><div><b id="hits">—</b><span>打击点</span></div><div><b id="duration">—</b><span>时长</span></div><div><b id="density">—</b><span>密度 / 秒</span></div></div>
+          <div class="player">
+            <button id="play" class="playbtn" aria-label="播放或暂停">▶</button><button id="stop" class="stopbtn" aria-label="停止">■</button>
+            <span id="currentTime" class="playerTime">0:00.000</span><input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="播放进度"><span id="playerDuration" class="playerTime">0:00.000</span>
+            <label class="metro"><input id="metronome" type="checkbox" checked><span>节拍器</span><select id="metronomeVolume" aria-label="节拍器音量倍率"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="5">5×</option><option value="6">6×</option><option value="7">7×</option><option value="8">8×</option><option value="9">9×</option><option value="10">10×</option></select></label>
+            <label class="volume">音量<input id="volume" type="range" min="0" max="1" value="0.75" step="0.05"></label>
+          </div>
+          <div class="beatPulse" id="beatPulse"><span id="beatType">READY</span></div>
+          <div class="timeline previewWindow">
+            <div class="timelineHead"><span>跟随播放窗口</span><small id="previewWindowCount">当前 0 个节拍</small></div>
+            <div class="ruler"><span id="windowStartTime">00:00.000</span><span id="midtime">—</span><span id="endtime">—</span></div>
+            <div class="track" id="track" role="slider" tabindex="0" aria-label="节拍预览窗口，点击可定位播放"><i class="playhead" id="playhead"></i></div>
+            <div class="legend" id="definitionLegend"></div>
+          </div>
+        </div>
+      </div>
+      <aside class="card settings autoDetectPanel">
+        <div class="cardhead"><div><span class="label">DETECTION</span><h2>检测参数</h2></div><button class="iconbtn" id="reset" title="恢复默认">↺</button></div>
+        <div class="autoDetectFields">
+          <label>检测引擎<select id="engine"><option value="fast" selected>快速模式</option><option value="madmom">Madmom 神经网络</option></select></label>
+          <div class="grid"><label>时间偏移 <span>ms</span><input id="offset" type="number" value="0"></label><label>最小间隔 <span>ms</span><input id="minimum" type="number" value="200" min="0"></label></div>
+          <div class="grid"><label>舍入精度 <span>ms</span><input id="rounding" type="number" value="10" min="0"></label><label>判定容差 <span>sec</span><input id="tolerance" type="number" value="0.2" min="0" step="0.01"></label></div>
+          <p class="autoDetectNote">检测只生成初始节拍。逐拍修改、元数据、definitions 与导出请前往高级编辑。</p>
+        </div>
+        <div class="autoDetectActions">
+          <button class="primary" id="analyze" disabled><span id="buttonText">开始检测</span><span>→</span></button>
+          <button class="outline autoReplaceAudio" id="replaceAutoAudio">更换音频</button>
+          <p class="status" id="status">选择音频后即可开始</p>
+        </div>
+      </aside>
+    </section>
+    <section class="modePanel hidden" id="advancedPanel">
+      <div class="card advancedEmpty" id="advancedEmpty">
+        <p class="eyebrow">ADVANCED MULTITRACK EDITOR</p>
+        <h2>载入曲目，开始精细编排</h2>
+        <p>选择音频会创建一个空白 combat_line；也可以导入已有 .djcraft，与自动检测和资源管理共享同一工程。</p>
+        <div class="advancedEmptyActions">
+          <input id="advancedAudioInput" type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a">
+          <input id="advancedPackageInput" type="file" accept=".djcraft,application/zip">
+          <button class="primary" id="advancedChooseAudio">选择音频并新建</button>
+          <button class="outline" id="advancedImportPackage">导入 .djcraft</button>
+        </div>
+      </div>
+      <div class="advancedWorkspace hidden" id="advancedWorkspace">
+        <div class="card advancedToolbar">
+          <div class="advancedToolGroup">
+            <button id="advUndo" class="toolIcon" title="撤销 Ctrl+Z" aria-label="撤销" disabled>↶</button><button id="advRedo" class="toolIcon" title="重做 Ctrl+Y" aria-label="重做" disabled>↷</button>
+          </div>
+          <div class="advancedToolGroup">
+            <button id="advPlay" class="toolIcon transportPrimary" title="播放或暂停（空格）" aria-label="播放或暂停">▶</button><button id="advStop" class="toolIcon" title="停止" aria-label="停止">■</button>
+            <span class="advTime" id="advCurrentTime">00:00.000</span>
+            <label class="advancedMetro"><input id="advMetronome" type="checkbox" checked> 节拍器 <select id="advMetronomeVolume" aria-label="高级编辑节拍器音量倍率"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="5">5×</option><option value="6">6×</option><option value="7">7×</option><option value="8">8×</option><option value="9">9×</option><option value="10">10×</option></select></label>
+            <label class="advancedVolume">音量<input id="advVolume" type="range" min="0" max="1" value="0.75" step="0.05"></label>
+          </div>
+          <div class="advancedToolGroup advancedSnap">
+            <label><input id="advSnapEnabled" type="checkbox" checked> 吸附</label>
+            <select id="advSnapDivision" aria-label="吸附分拍"><option value="1">1 拍</option><option value="2">1/2 拍</option><option value="4" selected>1/4 拍</option><option value="8">1/8 拍</option></select>
+            <button id="advQuantize" class="toolIcon" title="量化所选节拍" aria-label="量化所选节拍">⌗</button>
+          </div>
+          <div class="advancedToolGroup">
+            <button id="advZoomOut" class="toolIcon" title="缩小" aria-label="缩小">−</button><button id="advFit" class="toolIcon" title="适应全曲" aria-label="适应全曲">⌂</button><button id="advZoomIn" class="toolIcon" title="放大" aria-label="放大">＋</button>
+          </div>
+          <div class="advancedToolGroup advancedToolbarEnd">
+            <button id="advToggleBatch" class="toolIcon" title="显示批量工具" aria-label="显示批量工具" aria-expanded="false">⚒</button><button id="advImportMidi" class="toolIcon midiTool" title="从 MIDI note 导入节拍" aria-label="从 MIDI 导入节拍">♫ MIDI</button><button id="advAddEvent" class="toolIcon" title="在播放头添加节拍（Enter）" aria-label="添加节拍">＋</button><button id="advDelete" class="toolIcon danger" title="删除所选（Delete）" aria-label="删除所选">⌫</button><button id="advExport" class="accent exportTool">导出 .djcraft</button>
+          </div>
+        </div>
+
+        <div class="advancedMain">
+          <div class="advancedTimelineColumn">
+            <div class="card advancedProjectBar">
+              <div><span class="label">CURRENT PROJECT</span><strong id="advProjectName">未命名曲目</strong><small id="advProjectInfo">0 轨 · 0 事件</small></div>
+              <div class="advancedProjectActions"><button id="advNewAudio">更换音频</button><button id="advImport">导入曲包</button></div>
+            </div>
+
+            <div class="card advancedTimelineCard">
+              <div class="advancedWaveRow">
+                <div class="advancedRowLabel"><span>WAVEFORM</span><small id="advWaveStatus">等待音频</small></div>
+                <canvas id="advWaveform" height="92" aria-label="音频振幅波形"></canvas>
+              </div>
+              <div class="advancedRulerRow">
+                <div class="advancedRowLabel"><span>TIME</span><small id="advZoomLabel">适应</small></div>
+                <canvas id="advRuler" height="34" aria-label="时间标尺"></canvas>
+              </div>
+              <div class="advancedTimelineScroll" id="advTimelineScroll" tabindex="0" aria-label="多轨时间线">
+                <div class="advancedTimelineContent" id="advTimelineContent">
+                  <div class="advancedPlayhead" id="advPlayhead"></div>
+                  <div class="advancedSelectionBox hidden" id="advSelectionBox"></div>
+                  <div id="advTrackRows"></div>
+                </div>
+              </div>
+              <div class="advancedStatusBar">
+                <span id="advSelectionStatus">未选择事件</span>
+                <span id="advStatus">双击轨道可在指针位置创建节拍</span>
+              </div>
+            </div>
+
+            <div class="card advancedBatchCard collapsed" id="advBatchCard">
+              <div class="advancedBatchHead"><div><span class="label">RANGE TOOLS</span><h3>选区批量工具</h3></div><span id="advRangeSummary">请选择同轨至少两个节拍</span></div>
+              <div class="advancedBatchGrid">
+                <fieldset>
+                  <legend>生成中间节拍</legend>
+                  <label>模式<select id="advGenerateMode"><option value="count">按个数</option><option value="bpm">按 BPM</option></select></label>
+                  <label><span id="advGenerateValueLabel">中间个数</span><input id="advGenerateValue" type="number" min="0" value="1" step="1"></label>
+                  <label>新节拍 type<input id="advGenerateType" value="normal_beat" list="advTypeList"></label>
+                  <button id="advGenerate">一键生成</button>
+                </fieldset>
+                <fieldset>
+                  <legend>周期改变 / 删除</legend>
+                  <label>周期 X<input id="advCycleSize" type="number" min="1" value="4" step="1"></label>
+                  <label>处理前 K 个<input id="advCycleTake" type="number" min="1" value="1" step="1"></label>
+                  <label>操作<select id="advCycleAction"><option value="type">改变 type</option><option value="delete">删除节拍</option></select></label>
+                  <label id="advCycleTypeWrap">目标 type<input id="advCycleType" value="strong_hit" list="advTypeList"></label>
+                  <button id="advPreviewCycle">预览影响</button><button id="advApplyCycle">应用周期操作</button>
+                </fieldset>
+                <fieldset>
+                  <legend>节拍密度</legend>
+                  <p>翻倍在相邻节拍中点插入并继承左拍；减半保留端点并删除奇数位内部节拍。</p>
+                  <button id="advDoubleDensity">选区节拍翻倍</button><button id="advHalfDensity">选区节拍减半</button>
+                </fieldset>
+              </div>
+            </div>
+          </div>
+
+          <aside class="card advancedInspector">
+            <div class="advancedInspectorTabs" role="tablist">
+              <button class="active" data-adv-inspector="event">事件</button><button data-adv-inspector="track">轨道</button><button data-adv-inspector="project">工程</button><button data-adv-inspector="definitions">定义</button>
+            </div>
+            <div id="advInspectorContent"></div>
+          </aside>
+        </div>
+        <datalist id="advTypeList"></datalist>
+      </div>
+      <dialog id="advMidiDialog" class="advancedMidiDialog" aria-labelledby="advMidiTitle">
+        <div class="advancedMidiShell">
+          <div class="advancedMidiHead">
+            <div><span class="label">MIDI NOTE IMPORT</span><h2 id="advMidiTitle">从 MIDI 导入节拍</h2></div>
+            <button id="advMidiClose" class="advancedMidiClose" aria-label="关闭 MIDI 导入">×</button>
+          </div>
+          <div class="advancedMidiUpload">
+            <label class="advancedMidiFile">MIDI 文件<input id="advMidiFile" type="file" accept=".mid,.midi,audio/midi,audio/x-midi"><span id="advMidiFileName">选择 .mid / .midi 文件</span></label>
+            <span id="advMidiSummary">尚未加载 MIDI</span>
+          </div>
+          <div class="advancedMidiRollWrap">
+            <canvas id="advMidiRoll" class="advancedMidiRoll" width="1200" height="420" tabindex="0" aria-label="MIDI 钢琴卷帘；拖动框选 note，按住 Ctrl 可追加选择"></canvas>
+            <div id="advMidiMarquee" class="advancedMidiMarquee hidden"></div>
+            <p id="advMidiPlaceholder">上传 MIDI 后会在这里显示 note。拖动框选，或点击单个 note；Ctrl/⌘ 可追加选择。</p>
+          </div>
+          <div class="advancedMidiSelectionBar">
+            <span id="advMidiSelection">未选择 note</span>
+            <div><button id="advMidiSelectAll">全选</button><button id="advMidiClearSelection">清除选择</button></div>
+          </div>
+          <div class="advancedMidiOptions">
+            <label>note 时间戳位置
+              <span class="advancedMidiPercent"><input id="advMidiPercent" type="range" min="0" max="100" value="0" step="1"><input id="advMidiPercentNumber" type="number" min="0" max="100" value="0" step="1"><b>%</b></span>
+              <small>0% = Note On，100% = Note Off</small>
+            </label>
+            <label>节拍定义<select id="advMidiDefinition"></select></label>
+            <label>目标轨道<select id="advMidiTrack"></select></label>
+          </div>
+          <div id="advMidiStatus" class="advancedMidiStatus" role="status"></div>
+          <div class="advancedMidiActions">
+            <button id="advMidiCancel">取消</button>
+            <button id="advMidiApply" class="accent" disabled>添加所选 note</button>
+          </div>
+        </div>
+      </dialog>
+    </section>
+    <section class="modePanel hidden" id="resourcesPanel">
+      <div class="resourceIntro">
+        <div><p class="eyebrow">TRACKPACK ASSETS</p><h2>资源管理</h2></div>
+        <p>为当前曲目包添加唱片贴图与连击数字。资源只保存在当前页面，并随 .djcraft 导出。</p>
+      </div>
+      <div class="resourceGrid">
+        <div class="card resourceCard">
+          <div class="resourceIcon">D</div>
+          <div><span class="label">NORMAL DISC</span><h3>普通唱片</h3><code>disc.png</code><p>物品模型与播放器的普通封面。</p></div>
+          <input id="discResource" type="file" accept="image/png">
+          <button class="outline resourceChoose" data-input="discResource">选择 PNG</button>
+        </div>
+        <div class="card resourceCard">
+          <div class="resourceIcon perfect">P</div>
+          <div><span class="label">PERFECT DISC</span><h3>完美唱片</h3><code>perfect_disc.png</code><p>唱片镀金后的物品模型与封面。</p></div>
+          <input id="perfectDiscResource" type="file" accept="image/png">
+          <button class="outline resourceChoose" data-input="perfectDiscResource">选择 PNG</button>
+        </div>
+        <div class="card comboCard">
+          <div class="comboHead"><div><span class="label">COMBO DIGITS</span><h3>连击数字贴图</h3></div><code id="comboPath">combo/0.png … 9.png</code></div>
+          <p>选择以 0.png–9.png 命名的图片；可只提供部分数字。基础阶段从 1 连击生效，高级阶段从设定阈值生效。</p>
+          <div class="comboControls">
+            <label>阶段阈值<input id="comboThreshold" type="number" value="1" min="1" step="1"></label>
+            <label class="comboUpload">数字图片<input id="comboResources" type="file" accept="image/png" multiple><span id="comboNames">未选择</span></label>
+            <button class="primary" id="addComboResources">添加到资源</button>
+          </div>
+        </div>
+        <div class="card resourceListCard">
+          <div class="resourceListHead"><div><span class="label">PACKAGE ASSETS</span><h3>当前自定义资源</h3></div><span id="resourceCount">0 个资源</span></div>
+          <div id="resourceList" class="resourceList"><p class="emptyResources">尚未添加自定义资源</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="midi-import.js?v=20260728-3"></script><script src="advanced-editor.js?v=20260729-2"></script><script src="app.js?v=20260729-1"></script><script src="workbench.js?v=20260728-2"></script>
+</body></html>
