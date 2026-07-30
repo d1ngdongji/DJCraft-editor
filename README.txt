@@ -25,7 +25,7 @@ Beat Track Studio 便携源码版
 - 可逐个修改节拍定义，也可复选多个节拍后批量应用。
 - 导出包包含 track.json、音频文件，以及可选的 disc.png。
 - 导出时自动把源音频转码为 OGG/Vorbis，track.json 的 sound_file 同步改为 .ogg。
-- 可编辑 version、author、BPM、difficulty、offset、playback_start_ms、总时长和 display_name；WAVEFORM 会遮罩起播位置之前不参与游戏播放的前段。
+- 可编辑 version、author、BPM、difficulty、offset、playback_start_ms、总时长和 display_name；WAVEFORM 会遮罩起播位置之前的前段，以及实际音频超出 total_duration_ms 的尾段。
 - display_name 提供 Minecraft §0～§f 颜色代码快捷插入。
 - settings 支持 crosshair_mode=beat/time，并按模式启用节拍数量或毫秒间隔。
 

@@ -56,12 +56,15 @@
     return eventIds.get(event);
   };
   const durationMs = () => Math.max(1, Math.round(Number(track?.meta?.total_duration_ms) || (audio?.duration || 0) * 1000 || 1));
+  const audioDurationMs = () => Math.max(0, Math.round((waveformBuffer?.duration || audio?.duration || 0) * 1000));
+  const displayDurationMs = () => Math.max(durationMs(), audioDurationMs(), 1);
   const playbackStartMs = () => Math.max(0, Math.round(Number(track?.meta?.playback_start_ms) || 0));
   const bpm = () => Math.max(0.0001, Number(track?.meta?.bpm) || 120);
   const division = () => Math.max(1, Number($("advSnapDivision")?.value) || 4);
   const snapStep = () => 60000 / bpm() / division();
   const snapTime = time => Math.round(Math.round(time / snapStep()) * snapStep());
   const clampTime = time => Math.max(0, Math.min(durationMs(), Math.round(time)));
+  const clampAudioTime = time => Math.max(0, Math.min(audioDurationMs() || durationMs(), Math.round(time)));
   const timelineNames = () => track?.timeline ? Object.keys(track.timeline) : [];
   const timelineEvents = name => Array.isArray(track?.timeline?.[name]) ? track.timeline[name] : [];
   const colorFor = type => {
@@ -244,7 +247,7 @@
     const scroll = $("advTimelineScroll");
     const labelWidth = matchMedia("(max-width: 760px)").matches ? 92 : 132;
     const viewportWidth = Math.max(320, (scroll?.clientWidth || 900) - labelWidth);
-    const timeWidth = Math.max(viewportWidth, durationMs() * pxPerMs);
+    const timeWidth = Math.max(viewportWidth, displayDurationMs() * pxPerMs);
     return { scroll, labelWidth, viewportWidth, timeWidth };
   }
 
@@ -734,7 +737,7 @@
   function fitTimeline(render = true) {
     if (!track) return;
     const { viewportWidth } = contentMetrics();
-    pxPerMs = Math.max(0.001, Math.min(1, viewportWidth / durationMs()));
+    pxPerMs = Math.max(0.001, Math.min(1, viewportWidth / displayDurationMs()));
     fitMode = true;
     $("advTimelineScroll").scrollLeft = 0;
     if (render) renderAll();
@@ -809,7 +812,8 @@
       waveformBuffer = buffer;
       waveformLevels = buildPeakLevels(buffer);
       $("advWaveStatus").textContent = `${buffer.numberOfChannels} 声道 · ${buffer.sampleRate} Hz`;
-      drawWaveform();
+      if (fitMode) fitTimeline(false);
+      renderAll();
     } catch (error) {
       if (token !== waveformToken) return;
       $("advWaveStatus").textContent = "波形解码失败，时间线仍可编辑";
@@ -928,27 +932,44 @@
       const playX = ((audio?.currentTime || 0) * 1000 - startMs) * pxPerMs;
       drawEnvelope("#66e2f5", .95, playX);
     }
-    const excludedEndX = (playbackStartMs() - startMs) * pxPerMs;
-    const excludedWidth = Math.max(0, Math.min(width, excludedEndX));
-    if (excludedWidth > 0) {
-      context.fillStyle = "#3d171dcc";
-      context.fillRect(0, 0, excludedWidth, height);
+    const drawExcludedRegion = (fromMs, toMs, label, fill, hatch) => {
+      const fromX = (fromMs - startMs) * pxPerMs;
+      const toX = (toMs - startMs) * pxPerMs;
+      const visibleFrom = Math.max(0, Math.min(width, fromX));
+      const visibleTo = Math.max(0, Math.min(width, toX));
+      const regionWidth = Math.max(0, visibleTo - visibleFrom);
+      if (regionWidth <= 0) return;
+      context.fillStyle = fill;
+      context.fillRect(visibleFrom, 0, regionWidth, height);
       context.save();
-      context.beginPath(); context.rect(0, 0, excludedWidth, height); context.clip();
-      context.strokeStyle = "#a84a5577"; context.lineWidth = 1;
-      for (let x = -height; x < excludedWidth + height; x += 12) {
+      context.beginPath(); context.rect(visibleFrom, 0, regionWidth, height); context.clip();
+      context.strokeStyle = hatch; context.lineWidth = 1;
+      for (let x = visibleFrom - height; x < visibleTo + height; x += 12) {
         context.beginPath(); context.moveTo(x, height); context.lineTo(x + height, 0); context.stroke();
       }
       context.restore();
-      if (excludedWidth >= 72) {
+      if (regionWidth >= 72) {
         context.fillStyle = "#ffd7d9";
         context.font = "700 10px ui-monospace";
-        context.fillText(`排除至 ${formatTime(playbackStartMs())}`, 10, 17, excludedWidth - 18);
+        context.fillText(label, visibleFrom + 10, 17, regionWidth - 18);
       }
+    };
+    const playbackStart = playbackStartMs();
+    drawExcludedRegion(0, playbackStart, `排除至 ${formatTime(playbackStart)}`, "#3d171dcc", "#a84a5577");
+    const audioEnd = audioDurationMs();
+    const configuredEnd = durationMs();
+    if (audioEnd > configuredEnd) {
+      drawExcludedRegion(configuredEnd, audioEnd, `${formatTime(configuredEnd)} 后排除`, "#3d2a13d9", "#bd874d88");
     }
+    const excludedEndX = (playbackStart - startMs) * pxPerMs;
     if (excludedEndX >= 0 && excludedEndX <= width && playbackStartMs() > 0) {
       context.strokeStyle = "#ff8d96"; context.lineWidth = 2;
       context.beginPath(); context.moveTo(excludedEndX + .5, 0); context.lineTo(excludedEndX + .5, height); context.stroke();
+    }
+    const configuredEndX = (configuredEnd - startMs) * pxPerMs;
+    if (audioEnd > configuredEnd && configuredEndX >= 0 && configuredEndX <= width) {
+      context.strokeStyle = "#ffbd73"; context.lineWidth = 2;
+      context.beginPath(); context.moveTo(configuredEndX + .5, 0); context.lineTo(configuredEndX + .5, height); context.stroke();
     }
     const playX = ((audio?.currentTime || 0) * 1000 - startMs) * pxPerMs;
     if (playX >= 0 && playX <= width) {
@@ -1465,7 +1486,7 @@
       const canvas = $("advWaveform");
       const rect = canvas.getBoundingClientRect();
       const start = scroll.scrollLeft / pxPerMs;
-      audio.currentTime = clampTime(start + (event.clientX - rect.left) / pxPerMs) / 1000;
+      audio.currentTime = clampAudioTime(start + (event.clientX - rect.left) / pxPerMs) / 1000;
       previewBeatIndex = findCombatBeat(audio.currentTime * 1000);
       updatePlayhead();
     };

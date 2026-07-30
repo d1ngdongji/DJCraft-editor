@@ -1,6 +1,6 @@
 # DJCraft 曲目包功能文档
 
-> 代码基线：Minecraft 1.21.1、NeoForge 21.1.218；文档核对日期：2026-07-22。  
+> 代码基线：Minecraft 1.21.1、NeoForge 21.1.218；文档核对日期：2026-07-29。
 > 状态标记：**已完成**表示当前代码存在可达实现；**部分完成**表示主流程存在但有限制或未贯通；**未完成**表示数据结构或入口已经预留，但没有实际消费逻辑。
 
 相关文档：[文档索引](README.md) · [资源包](resource-pack.md) · [数据包](data-pack.md) · [附属 Mod 接口](addon-api.md)
@@ -11,9 +11,9 @@
 
 - 音频文件及曲目元信息；
 - 战斗节拍时间线和每类节拍的判定参数；
-- 准星预览方式和播放音量；
-- 可选唱片、完美唱片和连击数字贴图；
-- 客户端与服务端用于一致性校验的定义哈希。
+- Legacy 准星预览方式、下落式谱面视觉和播放音量；
+- 可选 beat、唱片、完美唱片和连击数字贴图；
+- 客户端与服务端用于一致性校验的完整内容哈希。
 
 曲目包被加载后，会参与动态声音资源注册、DJ 唱片刻录、便携点唱机播放、DJ 会话时钟、战斗判定、准星渲染、节拍类别伤害规则、唱片统计和服务端向客户端下载等流程。
 
@@ -61,7 +61,7 @@ djcraft/trackpacks/example_track.djcraft
 
 ### 2.3 ID 规则
 
-当前加载器拒绝空 ID、`.`、`..`、长度超过 128 的 ID，以及包含控制字符、`/`、`\`、`:` 的 ID。
+目录名或归档文件名先按既有行为转为小写，再由校验器只接受小写字母、数字、点、下划线和连字符，长度上限 128；这与曲包作为 Minecraft 动态资源路径片段时的字符约束一致。空 ID、`.`、`..`、空格、Unicode 和路径分隔符均被拒绝。
 
 建议作者进一步只使用 Minecraft 资源路径安全字符：
 
@@ -69,7 +69,7 @@ djcraft/trackpacks/example_track.djcraft
 [a-z0-9._-]
 ```
 
-这是因为曲目 ID 还会用于声音事件、模型和贴图资源路径。当前校验器并未禁止空格等资源路径非法字符，详见“未完成与已知限制”。
+这是因为曲目 ID 还会用于声音事件、模型和贴图资源路径；非法 ID 会在扫描阶段被拒绝，不会进入动态资源注册。
 
 ## 3. `track.json` 格式
 
@@ -103,7 +103,14 @@ djcraft/trackpacks/example_track.djcraft
       "haptic_intensity": 1.0,
       "tolerance": 0.1,
       "particle": null,
-      "trigger": null
+      "trigger": null,
+      "texture": "beats/normal.gif",
+      "landing_x_percent": 50.0,
+      "spawn_advance_ms": 1400,
+      "hit_behavior": "freeze_dissipate",
+      "matched_hit_behavior": "bounce",
+      "miss_behavior": "none",
+      "rotation_rpm": 0.0
     },
     "strong_hit": {
       "can_attack": true,
@@ -138,11 +145,16 @@ djcraft/trackpacks/example_track.djcraft
 | `difficulty` | string | `"normal"` | 摘要信息 | **未完成：游戏 UI 和规则未使用** |
 | `sound_file` | string | `"track.ogg"` | 定位 OGG 音频 | **已完成** |
 | `offset_ms` | integer | `0` | 从 DJ 会话原始时间中扣除，整体校准判定时间线 | **已完成** |
-| `playback_start_ms` | integer | `0` | 音频与服务端会话时钟从该毫秒位置开始；开始位置之前的节拍不会补触发 | **已完成** |
-| `total_duration_ms` | integer | `180000` | 会话时长/统计上限等 | **已完成** |
+| `playback_start_ms` | integer | `0` | 原始音频与服务端会话时钟从该毫秒位置开始；开始位置之前的节拍不会补触发 | **已完成** |
+| `total_duration_ms` | integer | `180000` | 原始音频的排他结束位置；到点截断音频、终止双端会话并按播放模式切歌 | **已完成** |
 | `display_name` | string/null | 回退为 `packId` | 唱片名称和 UI 标题 | **已完成** |
 
-注意：上表第三列是 `TrackMeta.createDefault()` 的辅助对象取值，不是 JSON 解析器的逐字段默认值。加载器不会在缺失 `meta` 或字段时主动套用该对象；未填写 `playback_start_ms` 时 Gson 的整数零值使其从头播放，负值也按 `0` 处理；`sound_file` 另有 `track.ogg` 运行时回退。作者应始终提供完整 `meta`。
+注意：上表第三列是 `TrackMeta.createDefault()` 的辅助对象取值，不是 JSON 解析器的逐字段默认值。`meta`、有限且大于 0 的数值 `bpm` 和正整数 `total_duration_ms` 是加载必需项；小数 BPM 会按既有 `TrackMeta` 整数字段行为转换，因而不会阻止旧曲包加载。未填写 `playback_start_ms` 时 Gson 的整数零值使其从头播放，负值以及大于或等于 `total_duration_ms` 的值会被拒绝；`sound_file` 另有 `track.ogg` 运行时回退。作者应始终提供完整 `meta`。
+
+两个裁剪字段都使用未应用 `offset_ms` 的原始音频坐标，最终播放区间为
+`[playback_start_ms, total_duration_ms)`。例如开始位置为 `30000`、结束位置为
+`150000` 时实际最多播放 120 秒；`total_duration_ms` 不是“从开始位置起再播放多少毫秒”。
+结束位置之后的时间线事件不会触发，实际 OGG 若更早自然结束则仍以音频自然结束为准。
 
 ### 3.3 `settings` 字段
 
@@ -150,33 +162,66 @@ djcraft/trackpacks/example_track.djcraft
 
 | 字段 | 类型 | 默认值 | 当前用途 | 状态 |
 |---|---:|---:|---|---|
-| `crosshair_mode` | string | `"time"` | `time` 按未来毫秒范围显示；值恰为 `beat` 时按未来节拍数显示 | **已完成** |
-| `crosshair_time_ms` | integer | `1400` | `time` 模式准星预览窗口 | **已完成** |
-| `crosshair_beat_count` | integer | `4` | `beat` 模式未来节拍数量 | **已完成** |
+| `crosshair_mode` | string | `"time"` | Legacy 模式中，`time` 按未来毫秒范围显示；`beat` 按未来节拍数显示 | **已完成** |
+| `crosshair_time_ms` | integer | `1400` | Legacy `time` 模式准星预览窗口 | **已完成** |
+| `crosshair_beat_count` | integer | `4` | Legacy `beat` 模式未来节拍数量 | **已完成** |
 | `volume_multiplier` | number | `1.0` | 播放音量倍数 | **已完成** |
 
-当前没有范围校验。负值、零、极大数值或未知的 `crosshair_mode` 不会在加载阶段被拒绝；未知模式按 `time` 行为处理。
+加载阶段只接受 `time` 或 `beat`；`crosshair_time_ms` 必须非负，`crosshair_beat_count` 必须为正数，`volume_multiplier` 必须为有限数值。
+
+谱面呈现方式不是曲包设置。客户端配置 `beatPresentationMode` 默认为 `FALLING`，
+玩家可切换为 `LEGACY`；下落式模式不读取上述三个 `crosshair_*` 字段。下落式判定线
+高度由客户端整数滑杆 `fallingJudgeLineYPercent` 控制，默认 `66`，范围 `25..85`。
 
 ### 3.4 `definitions` 字段
 
-`definitions` 是“节拍类型名 → 节拍定义”的对象。`combat_line[*].type` 引用其中的键。引用不存在时，判定器使用默认定义，而不是拒绝曲目包。
+`definitions` 是“节拍类型名 → 节拍定义”的对象。所有时间线事件的 `type` 都必须引用其中的键，否则整个曲目包在加载阶段被拒绝。
 
 | 字段 | 类型 | 默认值 | 当前用途 | 状态 |
 |---|---:|---:|---|---|
 | `can_attack` | boolean | `true` | 为 `false` 时该节拍不能判定为命中，也不计入未命中连击重置的节拍数 | **已完成** |
-| `color` | string | `#FFFFFF` | 准星节拍颜色 | **已完成** |
-| `scale` | number | `1.0` | 视觉缩放预留 | **未完成：没有运行时代码读取** |
+| `color` | string | `#FFFFFF` | Legacy 节拍颜色；Falling 命中冲击波颜色 | **已完成** |
+| `scale` | number | `1.0` | Falling beat 贴图尺寸倍率，最长边基准为 32 GUI 像素 | **已完成** |
 | `category` | string | `"normal"` | 战斗类别：`normal`、`weakbeat` 或 `downbeat` | **已完成** |
 | `haptic_intensity` | number | `1.0` | 震动强度预留 | **未完成：没有运行时代码读取** |
 | `tolerance` | number | `0.1` | 判定容差 | **已完成** |
 | `particle` | string/null | `null` | 粒子资源预留 | **未完成：只提供 `hasParticle()`，没有触发逻辑** |
 | `trigger` | string/null | `null` | 条件触发预留 | **未完成：只提供 `hasTrigger()`，没有条件解析/执行逻辑** |
+| `texture` | string/null | `"djcraft:textures/gui/beats/blue_beat.png"` | Falling beat 的曲包相对 PNG/GIF 或普通资源位置；缺失时使用内置蓝色标记 | **已完成** |
+| `landing_x_percent` | number | `50.0` | beat 中心落点占整个 GUI 宽度的百分比 | **已完成** |
+| `spawn_advance_ms` | integer | `1400` | 在 `t` 之前多少毫秒从屏幕顶部生成；替代 Falling 模式预览窗口 | **已完成** |
+| `hit_behavior` | string | `"freeze_dissipate"` | 成功判定后的 beat 行为 | **已完成** |
+| `matched_hit_behavior` | string | 继承 `hit_behavior` | `weakbeat`/`downbeat` 卡拍成功且动作物品标签正确匹配后的 beat 行为 | **已完成** |
+| `miss_behavior` | string | `"none"` | 失败判定后的 beat 行为；失败始终另有 160ms 判定线红闪 | **已完成** |
+| `rotation_rpm` | number | `0.0` | 从生成时刻开始的每分钟转数；负数反向 | **已完成** |
 
 `tolerance` 的实际语义：
 
 - `tolerance > 1.0`：直接解释为毫秒数；例如 `80.0` 表示 ±80 ms。
 - `tolerance <= 1.0`：解释为相邻节拍间隔的比例；例如相邻间隔 500 ms、容差 `0.1`，判定窗口为 ±50 ms。
 - 首尾孤立节拍无法取得相邻间隔时，基准间隔为 500 ms。
+
+Falling 可视字段的约束为：`landing_x_percent` 在 `0..100`，`spawn_advance_ms`
+在 `1..60000`，`rotation_rpm` 在 `-10000..10000` 且必须有限。越界值回退对应
+默认值。行为支持 `none`、`freeze_dissipate`、`dissipate`、`bounce`：
+
+- `freeze_dissipate`：停留 120ms，再在 180ms 内放大淡出；
+- `dissipate`：立即在 220ms 内放大淡出；
+- `bounce`：在 320ms 内最多向上反弹约 28 GUI 像素并淡出；
+- `none`：不接管 beat，继续按原下落轨迹运动。
+
+`matched_hit_behavior` 只在攻击类判定中生效：`weakbeat` 要求本次动作物品属于
+`djcraft:swift`，`downbeat` 要求属于 `djcraft:smash`。只卡拍成功但标签不匹配时仍用
+`hit_behavior`；`normal`、盾牌、冲刺和二段跳等非攻击判定也使用普通 `hit_behavior`。
+客户端用实际动作 `ItemStack` 立即预测视觉，伤害与最终标签判定仍由服务端负责。
+
+Falling beat 的位置锚点是贴图正中央：生成时中心位于 GUI 顶边，计划时间 `t`
+到达时中心与判定线重合。命中后的停滞、消散或反弹从实际判定瞬间的位置开始，
+提前或延后命中都不会把 beat 瞬移到完美判定位置。
+
+命中始终从准确落点产生约 320ms 的荧光冲击环；该环由客户端片元 Shader
+根据 definition `color` 生成，不需要曲包提供冲击波贴图。失败时若行为为 `none`，beat
+不改变轨迹，只显示判定线红闪。纹理按原始 RGBA 渲染，`color` 不会染色自定义图片。
 
 ### 3.5 `timeline` 字段
 
@@ -191,9 +236,32 @@ djcraft/trackpacks/example_track.djcraft
 |---|---:|---|---|
 | `t` | integer | `0` | **已完成**；单位为毫秒 |
 | `type` | string | `"normal_hit"` | **已完成**；引用 `definitions` |
-| `props` | object | 空对象 | **未完成：原始标量值会被解析并保留，但生产代码没有读取任何事件覆盖属性** |
+| `props` | object | 空对象 | **已完成**；按事件覆盖同名 definition 字段 |
 
-`props` 当前只保留 number、boolean、string；数组、对象和 null 会被忽略。所有 number 会解析为 `Double`。
+`props` 只保留 number、boolean、string；数组、对象和 null 会被忽略。所有 number
+会解析为 `Double`。DJCraft 识别以下核心覆盖键：
+
+| props 键 | 类型 | 覆盖的 definition 字段 |
+|---|---:|---|
+| `can_attack` | boolean | `can_attack` |
+| `color` | string | `color` |
+| `scale` | number | `scale` |
+| `category` | string | `category`；仅接受 `normal`、`weakbeat`、`downbeat` |
+| `haptic_intensity` | number | `haptic_intensity` |
+| `tolerance` | number | `tolerance` |
+| `particle` | string | `particle`；空字符串等价于不启用 |
+| `trigger` | string | `trigger`；空字符串等价于不启用 |
+| `texture` | string | `texture` |
+| `landing_x_percent` | number | `landing_x_percent` |
+| `spawn_advance_ms` | integer-valued number | `spawn_advance_ms` |
+| `hit_behavior` | string | `hit_behavior` |
+| `matched_hit_behavior` | string | `matched_hit_behavior` |
+| `miss_behavior` | string | `miss_behavior` |
+| `rotation_rpm` | number | `rotation_rpm` |
+
+缺失键沿用事件 `type` 对应 definition 的值。类型错误、非有限 number 和未知
+`category` 会忽略并回退到 definition；未知键仍原样保留在 `BeatEvent.props()` 中，
+供附属 Mod 消费。核心覆盖由 `TrackPack.resolveDefinition(BeatEvent)` 统一解析。
 
 ## 4. 可选资源
 
@@ -202,7 +270,7 @@ djcraft/trackpacks/example_track.djcraft
 - 音频通过动态生成的 `djcraft:sounds.json` 注册为 `djcraft:trackpacks.<packId>`。
 - 资源层实际暴露路径为 `assets/djcraft/sounds/trackpacks/<packId>.ogg`。
 - `sound_file` 可以改变包内源文件名，但对外动态声音事件仍按 `packId` 稳定命名。
-- 当前实现面向 OGG；不会对扩展名、编码格式、声道或采样率做预检，解码失败会在播放阶段暴露。
+- 加载时要求音频文件真实存在，并流式预检 Ogg 页连续性、Vorbis identification/comment/setup 三个头、版本、声道数、正采样率、至少一个音频 packet 和正常 EOS；不符合 Minecraft 流式解码输入结构的包不会注册。
 
 ### 4.2 唱片贴图
 
@@ -238,6 +306,35 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 
 `packKey` 是由 `packId` 稳定派生的 UUID，用于保证 Minecraft 资源路径合法。没有成功加载任何自定义数字贴图的曲目使用内置阶段：1–49 连击使用基础数字，`>=50` 使用高连击数字。只要任意一张曲目包数字贴图成功加载，该曲目就完全禁用内置 `>=50` 阶段，由曲目包阶段和逐数字继承规则决定最终贴图。非法阈值会记录警告但不会阻止曲目包加载。
 
+### 4.4 Falling beat PNG/GIF
+
+曲包可在根目录增加小写资源路径：
+
+```text
+beats/normal.png
+beats/accent.gif
+beats/boss/drop.gif
+```
+
+definition 或事件 `props.texture` 使用同一相对路径。相对资源由动态曲目资源包暴露为：
+
+```text
+djcraft:textures/gui/beats/trackpacks/<packKey>/<path-after-beats/>
+```
+
+也可直接填写普通 Minecraft 资源位置，例如
+`exampleaddon:textures/gui/beats/plasma.gif`，由正常客户端资源包提供。PNG 和 GIF
+都会完整保留颜色与透明度；GIF 支持帧延迟、局部帧处置和有限/无限循环，每个 beat
+从自己的生成时刻开始播放。
+
+资源重载阶段执行解码，渲染帧只选择预解码帧。限制为：单边最多 1024 像素、GIF
+最多 256 帧、单资源最多 16,777,216 解码像素、一次快照最多 67,108,864 解码
+像素、单文件最多读取 32 MiB。路径非法、文件缺失、损坏或超限时记录警告并只让该
+引用回退内置蓝色 beat，不阻止曲包和其他有效图片加载。内置可选贴图为
+`djcraft:textures/gui/beats/blue_beat.png`、`green_beat.png` 和 `white_beat.png`。
+F3+T、曲包 UI 重载、服务端
+`/dj reload` 通知和下载完成后的资源刷新都会重建该快照。
+
 ## 5. 加载、重载与优先级
 
 ### 5.1 启动加载
@@ -251,12 +348,11 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 
 ### 5.2 哈希
 
-系统维护两种 SHA-256：
+系统维护三种 SHA-256：
 
-- 定义哈希：只计算原始 `track.json`，用于服务端/客户端一致性列表；
+- 定义哈希：只计算原始 `track.json`，保留给内部查询和兼容用途；
+- 完整内容哈希：按相对路径排序后纳入每个文件的路径、长度和内容，用于服务端/客户端 verified 校验；
 - 归档哈希：计算整个 `.djcraft` 文件，用于客户端下载完成后的完整性校验。
-
-因此，双端拥有相同 `track.json` 但音频或贴图不同，仍会被判定为“定义一致”。
 
 ### 5.3 重载入口
 
@@ -269,9 +365,9 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 
 ## 6. 多人同步与下载
 
-### 6.1 双端定义校验
+### 6.1 双端完整内容校验
 
-玩家登录服务端时，服务端下发全部 `packId → track.json SHA-256`。客户端与本地定义哈希取交集，生成 `verifiedPackIds`。
+玩家登录服务端或服务端 `/dj reload` 后，服务端下发全部 `packId → 完整内容 SHA-256`。客户端与本地完整内容哈希取交集，生成 `verifiedPackIds`，并把实际匹配结果回报服务端。
 
 结果含义：
 
@@ -280,7 +376,9 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 - ID 相同但哈希不同：版本不一致；
 - 仅客户端本地存在：不会进入服务端列表。
 
-### 6.2 下载命令
+### 6.2 下载 GUI 与命令
+
+播放器和刻录界面都可打开“下载”页。页面列出服务端公布的曲包及 verified/缺失/不匹配状态，传输时显示百分比、已下载量、总量和平均速度，并支持暂停、恢复与重新下载。暂停状态会同步到服务端，暂停期间不触发传输超时。
 
 ```text
 /djclient download <trackpack>
@@ -295,7 +393,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 1. 客户端发送下载请求；
 2. 服务端检查 ID、并发状态、归档存在性和大小；
 3. 服务端发送 transfer ID、总大小、归档 SHA-256；
-4. 服务端按最大 256 KiB 的块发送，每个窗口最多 4 块；
+4. 服务端按最大 256 KiB 的块发送，每个窗口最多 8 块；
 5. 客户端按连续 offset 写入临时 `.part` 文件，并对窗口 ACK；
 6. 下载完毕后客户端校验归档 SHA-256；
 7. 临时文件原子移动为 `<packId>.djcraft`（不支持原子移动时普通替换）；
@@ -309,12 +407,13 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 
 物品 `djcraft:empty_disc` 堆叠上限为 1。空白唱片可由配方获得，并在 DJ 刻录台 UI 中选择曲目。
 
-服务端接受刻录请求前会校验：
+刻录 UI 只列出 verified 曲包；服务端接受刻录请求前会再次校验：
 
 - 目标方块确实是 DJ 刻录台；
 - 玩家距方块不超过 8 格；
 - 指定手持物是尚无 `track_pack_id` 的空白唱片；
 - 服务端已加载目标曲目包。
+- 客户端已经回报与服务端完整内容哈希一致。
 
 成功后原物品写入：
 
@@ -330,9 +429,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 - 普通右键：打开 ModernUI 播放器；
 - `G` 热键也可打开播放器（以当前客户端按键逻辑为准）。
 
-播放器按点唱机槽位顺序构造轮播与播放列表。只有能在客户端本地注册表中解析到曲目包的唱片会显示。
-
-**部分完成：** 当前容器只检查物品类型为 `empty_disc`，没有检查 `track_pack_id`，所以空白唱片也能放入；这与项目规则“仅接受已加载曲目包的唱片”不一致。
+播放器按点唱机槽位顺序构造轮播与播放列表。只有曲目包通过当前服务端完整内容哈希验证的唱片会显示。54 槽容器只允许带 `track_pack_id` 且该曲目已在当前侧加载的刻录唱片进入；空白唱片或指向未加载曲目的唱片不能放入。
 
 ## 8. 播放与 DJ 会话
 
@@ -341,13 +438,14 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 播放流程：
 
 1. 客户端播放器选择唱片并提交播放请求；
-2. 服务端确认自己已加载曲目，并确认玩家确实持有匹配的点唱机唱片；
+2. 服务端确认自己已加载曲目、客户端已回报匹配的完整内容哈希，并确认玩家确实持有匹配的点唱机唱片；
 3. 服务端创建 `DJSession`，下发 session ID、曲目 ID、唱片 UUID；
 4. 客户端加载本地曲目，并从 `playback_start_ms`（或多人组播追赶到的更晚位置）启动 OpenAL 音频；
 5. 客户端报告实际播放就绪时间，服务端同步会话时钟；
 6. 服务端与客户端会话使用同一播放位置，并以 `播放时间 - offset_ms` 作为虚拟时间线时间；开始位置之前的节拍视为已经过，不会集中补触发；
-7. 自然结束、手动停止或切歌后持久化唱片统计；
-8. 播放列表可按顺序、单曲循环或列表循环模式推进。
+7. 原始播放位置到达 `total_duration_ms` 时，客户端截断音频、服务端终止继续判定；单人和多人播放列表都把它作为自然结束并按当前模式推进；
+8. 自然结束、手动停止或切歌后持久化唱片统计；
+9. 播放列表可按顺序、单曲循环或列表循环模式推进。
 
 管理员还可使用：
 
@@ -362,7 +460,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 /dj reload
 ```
 
-`play`、`stop`、`set`、`reload` 要求权限等级 2；`list` 无该限制。管理员播放不要求物理唱片，因此不会关联唱片 UUID/统计。
+`play`、`stop`、`set`、`reload` 要求权限等级 2；`list` 无该限制。管理员播放不要求物理唱片，因此不会关联唱片 UUID/统计。`/dj play` 先向每个目标客户端发送带请求令牌的资源预检；哈希不匹配时自动下载可分发归档，客户端加载并回报最终完整内容哈希后服务端才创建会话。不可下载、校验失败或超时都会向命令来源给出明确失败回执。
 
 `/dj set combo` 和 `/dj set energy` 只修改目标玩家当前正在进行的 DJ 会话。连击数必须是非负整数；能量必须是非负数，并按每名玩家当前的 `djcraft:max_energy` 上限截断。修改后服务端会立即同步客户端 HUD；设置的连击也会计入本次会话最大连击。创造模式玩家的能量仍遵循无限能量规则，会在后续会话 tick 恢复为最大值。
 
@@ -371,7 +469,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 当前战斗判定只使用 `timeline.combat_line`：
 
 - 在排序后的时间线中二分查找当前时间前后的最近节拍；
-- 读取该事件 `type` 对应的 definition；
+- 读取该事件 `type` 对应的 definition，并应用该事件的合法 `props` 覆盖；
 - `can_attack=false` 直接判定失败，且该节拍不会推进“连续若干节拍未命中后重置连击”的计数；
 - 当前时间落入 `tolerance` 窗口则命中；
 - 命中结果携带 definition 的 `category`，由服务端结合出手武器标签计算最终倍率；
@@ -388,7 +486,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 物品标签规则扩展这两个标签。旧 `damage_rate` 字段已移除；即使旧曲目包仍包含该字段，
 加载器也会忽略它。
 
-服务端会根据客户端提交的判定时刻重新评估 proof，曲目定义哈希用于提示双端一致性，但当前播放入口没有强制 verified 状态（见下一节）。
+服务端会根据客户端提交的判定时刻重新评估 proof；普通播放、管理员播放、播放器 UI、客户端会话启动和刻录均强制使用 verified 完整内容状态。
 
 快捷栏任一格或副手存在 `djcraft:note_in_a_bottle`（瓶中音符）时，玩家在 DJ 会话中的
 可用空中多段跳次数增加 1。物品移入或移出这些位置时，服务端会在会话 tick 中实时更新
@@ -398,6 +496,11 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 快捷栏任一格或副手存在 `djcraft:band_of_energy`（能量手环）时，玩家在 DJ 会话中的
 最大能量增加 25。物品移入或移出这些位置时，服务端会实时重算并同步最大值；背包其他
 位置不生效，携带多个也不会叠加。移出手环后，超过新上限的当前能量会被截断。
+
+能量恢复按服务端连击数分为三档：连击低于 5 时每 10 tick 自动恢复 1 点，每次连击增长
+恢复 1 点；连击达到 5 后每 5 tick 自动恢复 1 点，每次连击增长仍恢复 1 点；连击达到
+10 后仍为每 5 tick 自动恢复 1 点，但每次连击增长恢复 2 点。所有恢复均受当前最大能量
+上限约束；创造模式玩家始终保持满能量。
 
 快捷栏任一格或副手存在 `djcraft:flowery` 时，DJ 冲刺的水平速度变为配置
 `dashHorizontalSpeed` 的 1.5 倍。服务端在冲刺后的 20 tick 内检测玩家移动路径与敌对
@@ -420,7 +523,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 - 历史最大连击；
 - 累计播放时长。
 
-会话结束时，累计时长最多按 `total_duration_ms` 计入本次播放；最大连击取历史与本次较大值。唱片移动槽位后优先按 UUID 重新定位，槽位仅作为旧数据/后备定位。检测到重复 UUID 时会为重复唱片重新分配 UUID。
+会话结束时，累计时长只计算客户端首次就绪位置到实际停止位置之间、且位于裁剪结束位置之前的实际播放区间；因此掐头位置和多人中途加入前的时间不会被计入，单次上限不超过有效裁剪区间。最大连击取历史与本次较大值。唱片移动槽位后优先按 UUID 重新定位，槽位仅作为旧数据/后备定位。检测到重复 UUID 时会为重复唱片重新分配 UUID。
 
 达到 80% 战斗节拍数的最大连击后显示镀金唱片。普通和镀金贴图都支持曲目包自定义。
 
@@ -437,7 +540,7 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 - 音频及任意可选资源读取也执行相对路径约束；
 - 下载后校验整个归档 SHA-256，再进入加载流程。
 
-加载器当前主要做结构解析和路径安全检查，不提供完整 JSON Schema 语义校验。缺失字段、非法范围和不存在的音频可能到较晚阶段才失败。
+加载器还会在注册前拒绝：缺失 `meta`、非正 BPM/总时长、负播放起点、播放起点不早于裁剪结束位置、负事件时间、非法 `#RRGGBB` 颜色、未知准星模式、无效准星范围、非有限浮点数、缺失 definition 引用、缺失音频及结构不完整的 Ogg Vorbis 流。该检查不是完整 JSON Schema，也不会执行 Vorbis 采样解码。
 
 ## 12. 未完成与已知限制
 
@@ -451,22 +554,14 @@ djcraft:textures/gui/combo/trackpacks/<packKey>/<threshold>/<digit>.png
 4. **definition 的 `haptic_intensity` 未完成。** 没有手柄震动/触觉反馈实现。
 5. **definition 的 `particle` 未完成。** 没有粒子注册、解析或命中触发器。
 6. **definition 的 `trigger` 未完成。** 没有条件语言或运行时条件判断。
-7. **事件 `props` 覆盖机制未完成。** 数据会保留，但不会覆盖 definition，也没有业务消费者。
-8. **特效轨调度未完成。** 非 `combat_line` 轨道会被加载到 `effectLines`，但没有按会话时钟派发灯光、粒子、镜头或其他效果。
+7. **特效轨调度未完成。** 非 `combat_line` 轨道会被加载到 `effectLines`，但没有按会话时钟派发灯光、粒子、镜头或其他效果。
 
 ### 12.2 部分完成或尚未贯通的流程
 
-1. **verified 集合未强制用于播放和刻录。** `ClientTrackRegistry.isVerified()` 当前只用于 `/djclient download` 的重复下载判断。播放器 UI、客户端播放启动和刻录 UI 没有统一用 verified 集合过滤；服务端播放请求也不知道客户端实际哈希是否匹配。
-2. **管理员 `/dj play` 不检查目标客户端资源。** 服务端可直接启动会话；目标客户端缺包时客户端启动失败，缺少自动下载/明确回执闭环。
-3. **服务端只分发压缩包。** 目录包能加载、播放和覆盖同名归档，但不能通过下载协议提供给客户端。
-4. **定义哈希不覆盖音频和美术资源。** 两端 `track.json` 一致但 OGG/PNG 不同时仍显示 verified。
-5. **便携点唱机槽位约束不完整。** 当前允许未刻录的空白唱片进入 54 槽容器，也不在放入时检查曲目是否已加载。
-6. **资源 ID 校验不完整。** `TrackPackIdValidator` 比 Minecraft `ResourceLocation` 规则宽松，含空格等 ID 可能通过加载，却在动态声音/模型/贴图注册阶段失败。
-7. **JSON 语义验证不完整。** 未强制 `meta`、正数 BPM/时长、有效颜色、合法准星模式、非负时间、definition 引用完整性和有限数值。
-8. **音频预检不完整。** 加载时登记音频路径，但目录包不会因文件不存在而拒绝加载；编码可播放性也不在加载阶段验证。
-9. **`disc.jpg` 支持不一致。** ModernUI 播放器支持它作为普通封面后备，动态物品模型与资源枚举只支持 PNG。
-10. **缺少曲目包作者工具链。** 仓库没有示例曲目包、JSON Schema、打包器、格式检查 CLI 或时间线编辑器；作者需手工制作并通过运行日志排错。
-11. **下载没有图形界面和进度展示。** 当前入口是 `/djclient download`，消息只报告请求、成功或失败，没有百分比、速度、暂停或恢复。
+1. **服务端只分发压缩包。** 目录包能加载、播放和覆盖同名归档，但不能通过下载协议提供给客户端。
+2. **音频预检不执行采样解码。** 加载阶段流式验证 Ogg 页连续性和 Vorbis 三个头/packet/EOS 结构，但合法容器中的损坏编码数据仍可能在实际解码时失败。
+3. **`disc.jpg` 支持不一致。** ModernUI 播放器支持它作为普通封面后备，动态物品模型与资源枚举只支持 PNG。
+4. **缺少曲目包作者工具链。** 仓库没有示例曲目包、JSON Schema、打包器、格式检查 CLI 或时间线编辑器；作者需手工制作并通过运行日志排错。
 
 ### 12.3 DJ 组网
 
@@ -479,7 +574,7 @@ DJ 组网是服务端权威的临时播放组，已提供以下行为：
 - 每名玩家最多加入一个组网。只有当前房主可以点歌、切歌、切换模式和停止。房主离开或掉线时转交给最早加入且仍在线的正式成员；没有可接任成员时解散。
 - 正式入组会停止个人 DJ 会话，组内不能另行开始个人播放。死亡不退出组网，重生后从当前播放位置恢复。管理员强制 `/dj play` 或 `/dj stop` 会先将目标移出组网。
 
-组网校验使用“完整内容 SHA-256”，其输入是按相对路径排序后的每个文件路径、长度和内容，因此覆盖音频、美术和定义。该指纹与现有只表示 `track.json` 定义的哈希并存，不改变旧 API 的含义。下载协议仍按归档 SHA-256 校验传输文件本身。
+组网与普通 verified 校验都使用“完整内容 SHA-256”，其输入是按相对路径排序后的每个文件路径、长度和内容，因此覆盖音频、美术和定义。只表示 `track.json` 的定义哈希仍保留给内部查询；下载协议另按归档 SHA-256 校验传输文件本身。
 
 组内每名玩家仍有独立的 session ID、能量、连击、容错、移动和战斗验证状态，但当前歌曲的服务端 `DJSession` 共享同一个 `GroupPlaybackClock`。客户端的 `DJSessionClient.getCurrentTimeMs()`、节拍、动画、判定、播放结束检测都继续读取各自 OpenAL source；服务端时间只用于服务端会话、一次性迟到定位和反作弊时钟偏移，不周期覆盖 OpenAL，也不执行常规漂移 seek。
 
@@ -508,7 +603,9 @@ DJ 组网是服务端权威的临时播放组，已提供以下行为：
 - 明确填写全部 `meta` 字段，不依赖缺失字段回退。
 - 使用毫秒编排 `combat_line`，并确保事件 `type` 能在 `definitions` 中找到。
 - 为每种可攻击节拍设置合理的 `tolerance` 和 `category`。
-- 当前不要依赖 `scale`、`haptic_intensity`、`particle`、`trigger`、`props` 或非战斗轨产生实际效果。
+- 可用 `props` 为单个事件覆盖 definition；其中 `can_attack`、`color`、`category`
+  和 `tolerance` 有现有运行时消费者。不要依赖 `scale`、`haptic_intensity`、
+  `particle`、`trigger` 或非战斗轨产生尚未实现的实际效果。
 - 如需服务器下载，发布 `.djcraft`，不要只安装目录包。
 - 控制压缩及解压总量低于服务器的 `maxTrackPackDownloadMiB`。
 - 可选贴图优先使用 PNG；建议与 Minecraft 物品/GUI 贴图保持合适尺寸和透明通道。
