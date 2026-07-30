@@ -2,7 +2,7 @@
   const modes = {
     autoPanel: ["自动检测", "提取节拍并预览检测结果"],
     advancedPanel: ["高级编辑", "多轨波形、节拍编排与批量处理"],
-    resourcesPanel: ["资源管理", "管理随曲目包导出的唱片与连击资源"]
+    resourcesPanel: ["资源管理", "管理随曲目包导出的 beat、唱片与连击资源"]
   };
 
   document.querySelectorAll(".modeTab").forEach(button => button.addEventListener("click", () => {

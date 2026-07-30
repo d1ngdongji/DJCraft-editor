@@ -15,12 +15,21 @@
     haptic_intensity: 1,
     tolerance: 0.1,
     particle: null,
-    trigger: null
+    trigger: null,
+    texture: "djcraft:textures/gui/beats/blue_beat.png",
+    landing_x_percent: 50,
+    spawn_advance_ms: 1400,
+    hit_behavior: "freeze_dissipate",
+    miss_behavior: "none",
+    rotation_rpm: 0
   });
   const KNOWN_DEFINITION_KEYS = new Set([
     "can_attack", "color", "scale", "damage_rate", "category", "haptic_intensity",
-    "tolerance", "particle", "trigger"
+    "tolerance", "particle", "trigger", "texture", "landing_x_percent",
+    "spawn_advance_ms", "hit_behavior", "matched_hit_behavior", "miss_behavior",
+    "rotation_rpm"
   ]);
+  const BEAT_BEHAVIORS = ["none", "freeze_dissipate", "dissipate", "bounce"];
 
   let adapter = null;
   let project = null;
@@ -50,6 +59,7 @@
   let resizeObserver = null;
   let inspectorInputTimer = 0;
   let waveformScrubbing = false;
+  let bulkPropDraft = { key: "", expression: "" };
 
   const idFor = event => {
     if (!eventIds.has(event)) eventIds.set(event, `e${nextEventId++}`);
@@ -208,6 +218,7 @@
       eventIds = new WeakMap();
       lastSelectedId = null;
       fitMode = true;
+      bulkPropDraft = { key: "", expression: "" };
     }
     $("advancedEmpty")?.classList.toggle("hidden", !!track);
     $("advancedWorkspace")?.classList.toggle("hidden", !track);
@@ -1055,6 +1066,11 @@
       $("advInspectorContent").innerHTML = `<div class="advInspectorSection"><h3>${infos.length} 个事件</h3>
         <label>批量设置 type<input id="advBulkEventType" list="advTypeList" placeholder="输入 type"></label>
         <button class="wide" data-action="apply-bulk-type">应用到所选事件</button>
+        <h4>BULK PROPS</h4>
+        <label>属性名<input id="advBulkPropKey" value="${esc(bulkPropDraft.key)}" placeholder="landing_x_percent"></label>
+        <label>值表达式<input id="advBulkPropExpression" value="${esc(bulkPropDraft.expression)}" placeholder='x % 4 === 0 ? "beats/a.png" : null'></label>
+        <button class="wide" data-action="apply-bulk-prop">计算并批量添加</button>
+        <p class="subtle">使用类 JavaScript 表达式：支持算术、比较、&amp;&amp;、||、!、三元条件“? :”、字符串拼接，以及 abs / round / floor / ceil / min / max / pow / sqrt / clamp。结果会保存为 number、string 或 boolean；null 表示该事件不修改。x / i 从 0 开始，n 从 1 开始，t 是事件时间（ms），count 是所选数量。</p>
         <label>复制到轨道<select id="advCopyTarget">${timelineNames().map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}</select></label>
         <button class="wide" data-action="copy-to-track">按绝对时间复制</button>
         <p class="subtle">跨轨复制会保留时间、type 与 props；复制进 combat_line 时会自动补齐缺失 definition。</p></div>`;
@@ -1069,7 +1085,7 @@
       <h4>PROPS</h4><div class="advProps">${Object.entries(props).map(([key, value]) => propRow(key, value)).join("")}</div>
       <label>新属性名<input id="advNewPropKey" placeholder="label"></label><label>值<input id="advNewPropValue" placeholder="drop"></label>
       <button data-action="add-event-prop">添加属性</button>
-      <p class="advInspectorNote">props 仅支持 number、boolean、string；游戏当前会保留这些值，但尚未消费事件覆盖属性。</p></div>`;
+      <p class="advInspectorNote">props 仅支持 number、boolean、string；与 definition 同名的核心字段（包括 Falling 视觉字段）会覆盖当前事件，其他标量扩展键仍会保留。</p></div>`;
   }
 
   function propRow(key, value) {
@@ -1086,6 +1102,228 @@
     if (text === "false") return false;
     if (text !== "" && Number.isFinite(Number(text))) return Number(text);
     return text;
+  }
+
+  function compileBulkExpression(source) {
+    const text = String(source).trim();
+    if (!text) throw Error("值表达式不能为空");
+    let position = 0;
+    let token;
+
+    const readToken = () => {
+      while (/\s/.test(text[position] || "")) position++;
+      const start = position;
+      if (position >= text.length) return { type: "eof", value: "", position };
+      const remaining = text.slice(position);
+      const number = remaining.match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/);
+      if (number) {
+        position += number[0].length;
+        return { type: "number", value: Number(number[0]), position: start };
+      }
+      const identifier = remaining.match(/^[A-Za-z_][A-Za-z0-9_]*/);
+      if (identifier) {
+        position += identifier[0].length;
+        return { type: "identifier", value: identifier[0], position: start };
+      }
+      const quote = text[position];
+      if (quote === '"' || quote === "'") {
+        position++;
+        let value = "";
+        while (position < text.length) {
+          const char = text[position++];
+          if (char === quote) return { type: "string", value, position: start };
+          if (char !== "\\") {
+            value += char;
+            continue;
+          }
+          if (position >= text.length) break;
+          const escaped = text[position++];
+          const escapes = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v" };
+          if (escaped === "u") {
+            const hex = text.slice(position, position + 4);
+            if (!/^[0-9a-f]{4}$/i.test(hex)) throw Error(`表达式第 ${position + 1} 个字符的 Unicode 转义无效`);
+            value += String.fromCharCode(parseInt(hex, 16));
+            position += 4;
+          } else value += Object.prototype.hasOwnProperty.call(escapes, escaped) ? escapes[escaped] : escaped;
+        }
+        throw Error(`表达式第 ${start + 1} 个字符的字符串缺少结束引号`);
+      }
+      const operators = ["===", "!==", "**", "&&", "||", "==", "!=", "<=", ">=", "+", "-", "*", "/", "%", "(", ")", "?", ":", ",", "!", "<", ">"];
+      const operator = operators.find(item => text.startsWith(item, position));
+      if (!operator) throw Error(`表达式第 ${position + 1} 个字符无效`);
+      position += operator.length;
+      return { type: "operator", value: operator, position: start };
+    };
+    const advance = () => {
+      const current = token;
+      token = readToken();
+      return current;
+    };
+    const match = value => {
+      if (token.type !== "operator" || token.value !== value) return false;
+      advance();
+      return true;
+    };
+    const expect = value => {
+      if (!match(value)) throw Error(`表达式第 ${token.position + 1} 个字符应为 ${value}`);
+    };
+    const binary = (operator, left, right) => ({ type: "binary", operator, left, right });
+
+    const parsePrimary = () => {
+      if (token.type === "number" || token.type === "string") {
+        const current = advance();
+        return { type: "literal", value: current.value };
+      }
+      if (token.type === "identifier") {
+        const name = advance().value;
+        if (name === "true") return { type: "literal", value: true };
+        if (name === "false") return { type: "literal", value: false };
+        if (name === "null") return { type: "literal", value: null };
+        if (!match("(")) return { type: "variable", name };
+        const args = [];
+        if (!match(")")) {
+          do { args.push(parseConditional()); } while (match(","));
+          expect(")");
+        }
+        return { type: "call", name, args };
+      }
+      if (match("(")) {
+        const value = parseConditional();
+        expect(")");
+        return value;
+      }
+      throw Error(`表达式第 ${token.position + 1} 个字符缺少值`);
+    };
+    const parsePower = () => {
+      const left = parsePrimary();
+      return match("**") ? binary("**", left, parseUnary()) : left;
+    };
+    const parseUnary = () => {
+      if (token.type === "operator" && ["!", "+", "-"].includes(token.value)) {
+        return { type: "unary", operator: advance().value, argument: parseUnary() };
+      }
+      return parsePower();
+    };
+    const parseMultiplicative = () => {
+      let value = parseUnary();
+      while (token.type === "operator" && ["*", "/", "%"].includes(token.value)) {
+        value = binary(advance().value, value, parseUnary());
+      }
+      return value;
+    };
+    const parseAdditive = () => {
+      let value = parseMultiplicative();
+      while (token.type === "operator" && ["+", "-"].includes(token.value)) {
+        value = binary(advance().value, value, parseMultiplicative());
+      }
+      return value;
+    };
+    const parseComparison = () => {
+      let value = parseAdditive();
+      while (token.type === "operator" && ["<", "<=", ">", ">="].includes(token.value)) {
+        value = binary(advance().value, value, parseAdditive());
+      }
+      return value;
+    };
+    const parseEquality = () => {
+      let value = parseComparison();
+      while (token.type === "operator" && ["==", "===", "!=", "!=="].includes(token.value)) {
+        value = binary(advance().value, value, parseComparison());
+      }
+      return value;
+    };
+    const parseLogicalAnd = () => {
+      let value = parseEquality();
+      while (match("&&")) value = binary("&&", value, parseEquality());
+      return value;
+    };
+    const parseLogicalOr = () => {
+      let value = parseLogicalAnd();
+      while (match("||")) value = binary("||", value, parseLogicalAnd());
+      return value;
+    };
+    function parseConditional() {
+      const condition = parseLogicalOr();
+      if (!match("?")) return condition;
+      const consequent = parseConditional();
+      expect(":");
+      return { type: "conditional", condition, consequent, alternate: parseConditional() };
+    }
+
+    token = readToken();
+    const ast = parseConditional();
+    if (token.type !== "eof") throw Error(`表达式第 ${token.position + 1} 个字符无效`);
+    return variables => {
+      const finiteNumber = (value, label = "运算") => {
+        const number = Number(value);
+        if (!Number.isFinite(number)) throw Error(`${label}需要有限数字`);
+        return number;
+      };
+      const finiteResult = (value, label) => {
+        if (!Number.isFinite(value)) throw Error(`${label}结果必须是有限数字`);
+        return value;
+      };
+      const calculate = node => {
+        if (node.type === "literal") return node.value;
+        if (node.type === "variable") {
+          if (!Object.prototype.hasOwnProperty.call(variables, node.name)) throw Error(`不支持的表达式变量：${node.name}`);
+          return variables[node.name];
+        }
+        if (node.type === "unary") {
+          const value = calculate(node.argument);
+          if (node.operator === "!") return !value;
+          return node.operator === "+" ? finiteNumber(value, "一元 + ") : -finiteNumber(value, "一元 - ");
+        }
+        if (node.type === "conditional") return calculate(node.condition) ? calculate(node.consequent) : calculate(node.alternate);
+        if (node.type === "call") {
+          const args = node.args.map(calculate);
+          const numeric = args.map(value => finiteNumber(value, `${node.name} `));
+          let result;
+          if (node.name === "abs" && numeric.length === 1) result = Math.abs(numeric[0]);
+          else if (node.name === "round" && numeric.length === 1) result = Math.round(numeric[0]);
+          else if (node.name === "floor" && numeric.length === 1) result = Math.floor(numeric[0]);
+          else if (node.name === "ceil" && numeric.length === 1) result = Math.ceil(numeric[0]);
+          else if (node.name === "sqrt" && numeric.length === 1) result = Math.sqrt(numeric[0]);
+          else if (node.name === "pow" && numeric.length === 2) result = Math.pow(numeric[0], numeric[1]);
+          else if (node.name === "min" && numeric.length) result = Math.min(...numeric);
+          else if (node.name === "max" && numeric.length) result = Math.max(...numeric);
+          else if (node.name === "clamp" && numeric.length === 3) result = Math.min(numeric[2], Math.max(numeric[1], numeric[0]));
+          else throw Error(`不支持的函数或参数数量：${node.name}`);
+          if (!Number.isFinite(result)) throw Error(`${node.name} 的结果必须是有限数字`);
+          return result;
+        }
+        if (node.operator === "&&") {
+          const left = calculate(node.left);
+          return left ? calculate(node.right) : left;
+        }
+        if (node.operator === "||") {
+          const left = calculate(node.left);
+          return left ? left : calculate(node.right);
+        }
+        const left = calculate(node.left);
+        const right = calculate(node.right);
+        if (node.operator === "+") {
+          if (typeof left === "string" || typeof right === "string") return String(left) + String(right);
+          return finiteResult(finiteNumber(left, "加法") + finiteNumber(right, "加法"), "加法");
+        }
+        if (node.operator === "-") return finiteResult(finiteNumber(left, "减法") - finiteNumber(right, "减法"), "减法");
+        if (node.operator === "*") return finiteResult(finiteNumber(left, "乘法") * finiteNumber(right, "乘法"), "乘法");
+        if (node.operator === "/") return finiteResult(finiteNumber(left, "除法") / finiteNumber(right, "除法"), "除法");
+        if (node.operator === "%") return finiteResult(finiteNumber(left, "取模") % finiteNumber(right, "取模"), "取模");
+        if (node.operator === "**") return finiteResult(finiteNumber(left, "乘方") ** finiteNumber(right, "乘方"), "乘方");
+        if (node.operator === "==" || node.operator === "===") return left === right;
+        if (node.operator === "!=" || node.operator === "!==") return left !== right;
+        if (node.operator === "<") return left < right;
+        if (node.operator === "<=") return left <= right;
+        if (node.operator === ">") return left > right;
+        return left >= right;
+      };
+      const value = calculate(ast);
+      if (value === null) return { matched: false };
+      if (!["number", "string", "boolean"].includes(typeof value)) throw Error("表达式结果必须是 number、string、boolean 或 null");
+      if (typeof value === "number" && !Number.isFinite(value)) throw Error("表达式结果必须是有限数字");
+      return { matched: true, value };
+    };
   }
 
   function renderTrackInspector() {
@@ -1149,14 +1387,30 @@
       ${definitionInput("tolerance", "判定容差 tolerance", definition.tolerance ?? 0.1, "number", "0.01")}
       ${definitionInput("particle", "粒子 particle", definition.particle ?? "")}
       ${definitionInput("trigger", "条件 trigger", definition.trigger ?? "")}
+      ${definitionInput("texture", "下落贴图 texture", definition.texture ?? "", "text", "", 'placeholder="beats/normal.png"')}
+      ${definitionInput("landing_x_percent", "落点横坐标 landing_x_percent (%)", definition.landing_x_percent ?? 50, "number", "0.1", 'min="0" max="100"')}
+      ${definitionInput("spawn_advance_ms", "提前生成 spawn_advance_ms (ms)", definition.spawn_advance_ms ?? 1400, "number", "1", 'min="1" max="60000"')}
+      ${behaviorSelect("hit_behavior", "命中行为 hit_behavior", definition.hit_behavior ?? "freeze_dissipate")}
+      ${behaviorSelect("matched_hit_behavior", "标签匹配命中 matched_hit_behavior", definition.matched_hit_behavior ?? "", true)}
+      ${behaviorSelect("miss_behavior", "未命中行为 miss_behavior", definition.miss_behavior ?? "none")}
+      ${definitionInput("rotation_rpm", "旋转速度 rotation_rpm", definition.rotation_rpm ?? 0, "number", "0.1", 'min="-10000" max="10000"')}
       <h4>扩展键</h4>
       <div class="advProps">${extras.map(([key, value]) => `<div class="advPropRow"><input value="${esc(key)}" readonly><input data-definition-extra="${esc(key)}" value="${esc(valueText(value))}"><button data-action="remove-definition-extra" data-key="${esc(key)}">×</button></div>`).join("")}</div>
       <label>新键<input id="advNewDefKey" placeholder="custom_key"></label><label>值<input id="advNewDefValue"></label><button data-action="add-definition-extra">添加扩展键</button>
-      <p class="advInspectorNote">scale、haptic_intensity、particle、trigger 当前可保存但尚无游戏运行时消费者。</p></div>`;
+      <p class="advInspectorNote">texture 可填写资源管理中的 beats/*.png 或 beats/*.gif；matched_hit_behavior 留空时继承 hit_behavior。haptic_intensity、particle、trigger 仍为预留字段。</p></div>`;
   }
 
-  function definitionInput(key, label, value, type = "text", step = "") {
-    return `<label>${label}<input data-definition-key="${key}" type="${type}" ${step ? `step="${step}"` : ""} value="${esc(value)}"></label>`;
+  function definitionInput(key, label, value, type = "text", step = "", attributes = "") {
+    return `<label>${label}<input data-definition-key="${key}" type="${type}" ${step ? `step="${step}"` : ""} ${attributes} value="${esc(value)}"></label>`;
+  }
+
+  function behaviorSelect(key, label, value, inherit = false) {
+    const options = [
+      ...(inherit ? [["", "继承 hit_behavior"]] : []),
+      ...BEAT_BEHAVIORS.map(item => [item, item])
+    ];
+    if (!options.some(([option]) => option === value)) options.unshift([value, `${value}（当前值无效）`]);
+    return `<label>${label}<select data-definition-key="${key}">${options.map(([option, text]) => `<option value="${option}" ${value === option ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
   }
 
   function addTrack() {
@@ -1218,6 +1472,31 @@
       commit(`批量设置 ${infos.length} 个事件 type`, () => {
         if (infos.some(info => info.trackName === "combat_line")) ensureDefinition(type);
         infos.forEach(info => { info.event.type = type; });
+      });
+    }
+    if (action === "apply-bulk-prop") {
+      const key = $("advBulkPropKey").value.trim();
+      const expression = $("advBulkPropExpression").value;
+      if (!key) return setStatus("属性名不能为空", true);
+      const infos = selectedInfo();
+      let values;
+      try {
+        const evaluate = compileBulkExpression(expression);
+        values = infos.map((info, index) => evaluate({
+          x: index, i: index, n: index + 1,
+          t: Number(info.event.t) || 0, count: infos.length
+        }));
+      } catch (error) {
+        return setStatus(error.message || String(error), true);
+      }
+      const matchedCount = values.filter(item => item.matched).length;
+      if (!matchedCount) return setStatus("没有事件命中条件，未修改 props", true);
+      commit(`批量添加 ${matchedCount}/${infos.length} 个事件属性 ${key}`, () => {
+        infos.forEach((info, index) => {
+          if (!values[index].matched) return;
+          info.event.props = info.event.props && typeof info.event.props === "object" ? info.event.props : {};
+          info.event.props[key] = values[index].value;
+        });
       });
     }
     if (action === "copy-to-track") {
@@ -1343,8 +1622,12 @@
         else if (target.type === "number") {
           const value = Number(target.value);
           if (!Number.isFinite(value)) throw Error(`${key} 必须是有限数值`);
+          if (key === "landing_x_percent" && (value < 0 || value > 100)) throw Error("landing_x_percent 必须在 0..100");
+          if (key === "spawn_advance_ms" && (!Number.isInteger(value) || value < 1 || value > 60000)) throw Error("spawn_advance_ms 必须是 1..60000 的整数");
+          if (key === "rotation_rpm" && (value < -10000 || value > 10000)) throw Error("rotation_rpm 必须在 -10000..10000");
           track.definitions[name][key] = value;
-        } else if ((key === "particle" || key === "trigger") && !target.value.trim()) track.definitions[name][key] = null;
+        } else if (key === "matched_hit_behavior" && !target.value) delete track.definitions[name][key];
+        else if ((key === "particle" || key === "trigger" || key === "texture") && !target.value.trim()) track.definitions[name][key] = null;
         else track.definitions[name][key] = target.value;
       });
       return;
@@ -1435,6 +1718,14 @@
       }
     };
     $("advInspectorContent").oninput = event => {
+      if (event.target.id === "advBulkPropKey") {
+        bulkPropDraft.key = event.target.value;
+        return;
+      }
+      if (event.target.id === "advBulkPropExpression") {
+        bulkPropDraft.expression = event.target.value;
+        return;
+      }
       if (!event.target.matches("#advEventTime")) return;
       const target = event.target;
       clearTimeout(inspectorInputTimer);

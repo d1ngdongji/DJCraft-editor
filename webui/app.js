@@ -6,10 +6,10 @@ const PREVIEW_WINDOW_MS=12000;
 const MAX_PACKAGE_BYTES=200*1024*1024,MAX_ZIP_ENTRIES=4096,MAX_TRACK_JSON_BYTES=1024*1024;
 const defaults={engine:'fast',offset:'0',minimum:'200',rounding:'10',tolerance:'0.2'};
 const defaultDefinitions=()=>({
-  normal_beat:{can_attack:true,color:'#FFFFFF',scale:1,category:'normal',haptic_intensity:1,tolerance:.2},
-  empty_beat:{can_attack:false,color:'#BEBEBE',scale:.7,category:'normal',haptic_intensity:1,tolerance:.2},
-  weak_beat:{can_attack:true,color:'#00FFFF',scale:.9,category:'weakbeat',haptic_intensity:1,tolerance:.2},
-  strong_beat:{can_attack:true,color:'#FFFF00',scale:1.2,category:'downbeat',haptic_intensity:1,tolerance:.2}
+  normal_beat:{can_attack:true,color:'#9999FF',scale:1,category:'normal',haptic_intensity:1,tolerance:.2,landing_x_percent:56,spawn_advance_ms:1000,texture:'djcraft:textures/gui/beats/blue_beat.png'},
+  empty_beat:{can_attack:false,color:'#BEBEBE',scale:1,category:'normal',haptic_intensity:1,tolerance:0,landing_x_percent:38,spawn_advance_ms:1000,texture:'djcraft:textures/gui/beats/empty_beat.png'},
+  weak_beat:{can_attack:true,color:'#77FFAA',scale:.8,category:'weakbeat',haptic_intensity:.7,tolerance:.33,landing_x_percent:44,spawn_advance_ms:700,texture:'djcraft:textures/gui/beats/blue_beat.png'},
+  strong_beat:{can_attack:true,color:'#FFFF00',scale:1.2,category:'downbeat',haptic_intensity:1.5,tolerance:.2,landing_x_percent:62,spawn_advance_ms:1400,texture:'djcraft:textures/gui/beats/green_beat.png'}
 });
 const clock=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 const stamp=ms=>`${String(Math.floor(ms/60000)).padStart(2,'0')}:${String(Math.floor(ms%60000/1000)).padStart(2,'0')}.${String(Math.max(0,ms%1000)).padStart(3,'0')}`;
@@ -42,7 +42,7 @@ function renderResources(){
   $('resourceCount').textContent=`${importedExtras.length} 个资源`;
   if(!importedExtras.length){list.innerHTML='<p class="emptyResources">尚未添加自定义资源</p>';return}
   list.innerHTML=importedExtras.map((resource,index)=>{
-    let data=resourceBytes(resource),isPng=resource.name.toLowerCase().endsWith('.png'),url=isPng?URL.createObjectURL(new Blob([data],{type:'image/png'})):'';
+    let data=resourceBytes(resource),extension=resource.name.toLowerCase().split('.').pop(),imageType={png:'image/png',gif:'image/gif'}[extension],url=imageType?URL.createObjectURL(new Blob([data],{type:imageType})):'';
     if(url)urls.push(url);
     return `<div class="resourceRow"><div>${url?`<img class="resourceThumb" src="${url}" alt="">`:'<span class="resourceThumb"></span>'}</div><code>${esc(resource.name)}</code><span class="resourceSize">${(data.length/1024).toFixed(data.length<10240?1:0)} KB</span><button class="resourceDelete" data-resource="${index}" title="删除资源" aria-label="删除 ${esc(resource.name)}">删除</button></div>`
   }).join('');
@@ -51,6 +51,18 @@ function renderResources(){
 document.querySelectorAll('.resourceChoose').forEach(button=>button.onclick=() => $(button.dataset.input).click());
 $('discResource').onchange=e=>{let picked=e.target.files[0];if(picked)addResource('disc.png',picked);e.target.value=''};
 $('perfectDiscResource').onchange=e=>{let picked=e.target.files[0];if(picked)addResource('perfect_disc.png',picked);e.target.value=''};
+$('beatResources').onchange=async e=>{
+  let files=[...e.target.files],valid=[],invalid=[];
+  for(let picked of files){
+    let name=picked.name.toLowerCase();
+    if(!/^[a-z0-9][a-z0-9._-]*\.(png|gif)$/.test(name)||picked.size>32*1024*1024)invalid.push(picked.name);
+    else valid.push({picked,name});
+  }
+  for(let item of valid)await addResource(`beats/${item.name}`,item.picked);
+  if(valid.length)setGlobalStatus(`已添加 ${valid.length} 个 beat 贴图：${valid.map(x=>`beats/${x.name}`).join('、')}${invalid.length?`；忽略 ${invalid.length} 个文件`:''}`);
+  else if(files.length)setGlobalStatus('未添加 beat 贴图：仅支持不超过 32 MiB、文件名仅含资源路径安全字符的 PNG/GIF',true);
+  e.target.value='';
+};
 $('comboThreshold').oninput=e=>{let value=Number(e.target.value);$('comboPath').textContent=value===1?'combo/0.png … 9.png':`combo/${value||'?'}/0.png … 9.png`};
 $('comboResources').onchange=e=>{$('comboNames').textContent=e.target.files.length?`${e.target.files.length} 个文件待添加`:'未选择'};
 $('addComboResources').onclick=async()=>{
@@ -191,7 +203,7 @@ function validateImportedTrack(track){
   }
   track.settings=track.settings&&typeof track.settings==='object'&&!Array.isArray(track.settings)?track.settings:{};
 }
-function mimeFor(name){let ext=name.toLowerCase().split('.').pop();return({ogg:'audio/ogg',mp3:'audio/mpeg',wav:'audio/wav',flac:'audio/flac',m4a:'audio/mp4',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'})[ext]||'application/octet-stream'}
+function mimeFor(name){let ext=name.toLowerCase().split('.').pop();return({ogg:'audio/ogg',mp3:'audio/mpeg',wav:'audio/wav',flac:'audio/flac',m4a:'audio/mp4',png:'image/png',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg'})[ext]||'application/octet-stream'}
 async function importPackage(packageFile,scrollToResult=true){
   if(!packageFile)return;
   $('status').textContent='正在解析 .djcraft 曲目包…';$('status').classList.add('loading');$('analyze').disabled=true;

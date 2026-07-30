@@ -38,20 +38,28 @@ UPLOAD_TEMP.mkdir(exist_ok=True)
 def _default_definitions(tolerance: float = .2):
     return {
         "normal_beat": {
-            "can_attack": True, "color": "#FFFFFF", "scale": 1.0,
+            "can_attack": True, "color": "#9999FF", "scale": 1.0,
             "category": "normal", "haptic_intensity": 1.0, "tolerance": tolerance,
+            "landing_x_percent": 56.0, "spawn_advance_ms": 1000,
+            "texture": "djcraft:textures/gui/beats/blue_beat.png",
         },
         "empty_beat": {
-            "can_attack": False, "color": "#BEBEBE", "scale": .7,
-            "category": "normal", "haptic_intensity": 1.0, "tolerance": .2,
+            "can_attack": False, "color": "#BEBEBE", "scale": 1.0,
+            "category": "normal", "haptic_intensity": 1.0, "tolerance": 0.0,
+            "landing_x_percent": 38.0, "spawn_advance_ms": 1000,
+            "texture": "djcraft:textures/gui/beats/empty_beat.png",
         },
         "weak_beat": {
-            "can_attack": True, "color": "#00FFFF", "scale": .9,
-            "category": "weakbeat", "haptic_intensity": 1.0, "tolerance": .2,
+            "can_attack": True, "color": "#77FFAA", "scale": .8,
+            "category": "weakbeat", "haptic_intensity": .7, "tolerance": .33,
+            "landing_x_percent": 44.0, "spawn_advance_ms": 700,
+            "texture": "djcraft:textures/gui/beats/blue_beat.png",
         },
         "strong_beat": {
             "can_attack": True, "color": "#FFFF00", "scale": 1.2,
-            "category": "downbeat", "haptic_intensity": 1.0, "tolerance": .2,
+            "category": "downbeat", "haptic_intensity": 1.5, "tolerance": .2,
+            "landing_x_percent": 62.0, "spawn_advance_ms": 1400,
+            "texture": "djcraft:textures/gui/beats/green_beat.png",
         },
     }
 

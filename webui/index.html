@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Beat Track Studio</title><meta name="description" content="本地音频节拍检测与游戏轨道 JSON 导出工具">
   <link rel="icon" type="image/png" href="logo.png?v=20260729">
-  <link rel="stylesheet" href="styles.css?v=20260727"><link rel="stylesheet" href="player.css?v=20260728"><link rel="stylesheet" href="editor.css?v=20260727"><link rel="stylesheet" href="advanced-editor.css?v=20260728-3"><link rel="stylesheet" href="workbench.css?v=20260729">
+  <link rel="stylesheet" href="styles.css?v=20260729-1"><link rel="stylesheet" href="player.css?v=20260728"><link rel="stylesheet" href="editor.css?v=20260727"><link rel="stylesheet" href="advanced-editor.css?v=20260728-3"><link rel="stylesheet" href="workbench.css?v=20260729-1">
 </head>
 <body>
   <header><a class="brand"><img class="brandmark" src="logo.png?v=20260729" alt="Beat Track Studio"><span>BEAT TRACK<br><small>STUDIO</small></span></a><div class="workspaceIdentity"><strong id="workspaceTitle">自动检测</strong><span id="workspaceHint">提取节拍并预览检测结果</span></div><div class="local"><i></i> 本地运行 · 音频不会上传云端</div></header>
@@ -17,7 +17,7 @@
     <nav class="modeNav" aria-label="主要功能">
       <button class="modeTab active" data-panel="autoPanel" aria-selected="true" aria-label="自动检测" title="自动检测"><b>01</b><span class="modeIcon">⌁</span><span class="modeCopy">自动检测<small>检测与只读预览</small></span></button>
       <button class="modeTab" data-panel="advancedPanel" aria-selected="false" aria-label="高级编辑" title="高级编辑"><b>02</b><span class="modeIcon">▥</span><span class="modeCopy">高级编辑<small>多轨、波形与批量工具</small></span></button>
-      <button class="modeTab" data-panel="resourcesPanel" aria-selected="false" aria-label="资源管理" title="资源管理"><b>03</b><span class="modeIcon">◇</span><span class="modeCopy">资源管理<small>唱片与连击贴图</small></span></button>
+      <button class="modeTab" data-panel="resourcesPanel" aria-selected="false" aria-label="资源管理" title="资源管理"><b>03</b><span class="modeIcon">◇</span><span class="modeCopy">资源管理<small>Beat、唱片与连击贴图</small></span></button>
     </nav>
     <section class="workspace modePanel" id="autoPanel">
       <div class="left autoMain">
@@ -199,7 +199,7 @@
     <section class="modePanel hidden" id="resourcesPanel">
       <div class="resourceIntro">
         <div><p class="eyebrow">TRACKPACK ASSETS</p><h2>资源管理</h2></div>
-        <p>为当前曲目包添加唱片贴图与连击数字。资源只保存在当前页面，并随 .djcraft 导出。</p>
+        <p>为当前曲目包添加 beat、唱片与连击数字贴图。资源只保存在当前页面，并随 .djcraft 导出。</p>
       </div>
       <div class="resourceGrid">
         <div class="card resourceCard">
@@ -213,6 +213,12 @@
           <div><span class="label">PERFECT DISC</span><h3>完美唱片</h3><code>perfect_disc.png</code><p>唱片镀金后的物品模型与封面。</p></div>
           <input id="perfectDiscResource" type="file" accept="image/png">
           <button class="outline resourceChoose" data-input="perfectDiscResource">选择 PNG</button>
+        </div>
+        <div class="card resourceCard beatResourceCard">
+          <div class="resourceIcon beat">B</div>
+          <div><span class="label">FALLING BEATS</span><h3>Beat 贴图</h3><code>beats/*.png / *.gif</code><p>可多选 PNG/GIF；文件名会转为小写，并作为 definition 的 texture 路径。</p></div>
+          <input id="beatResources" type="file" accept="image/png,image/gif,.png,.gif" multiple>
+          <button class="outline resourceChoose" data-input="beatResources">选择 PNG / GIF</button>
         </div>
         <div class="card comboCard">
           <div class="comboHead"><div><span class="label">COMBO DIGITS</span><h3>连击数字贴图</h3></div><code id="comboPath">combo/0.png … 9.png</code></div>
@@ -230,5 +236,5 @@
       </div>
     </section>
   </main>
-  <script src="midi-import.js?v=20260728-3"></script><script src="advanced-editor.js?v=20260729-3"></script><script src="app.js?v=20260729-1"></script><script src="workbench.js?v=20260728-2"></script>
+  <script src="midi-import.js?v=20260728-3"></script><script src="advanced-editor.js?v=20260730-1"></script><script src="app.js?v=20260729-2"></script><script src="workbench.js?v=20260729-1"></script>
 </body></html>
