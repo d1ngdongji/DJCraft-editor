@@ -60,6 +60,7 @@
   let inspectorInputTimer = 0;
   let waveformScrubbing = false;
   let bulkPropDraft = { key: "", expression: "" };
+  let bulkMathRuntime = null;
 
   const idFor = event => {
     if (!eventIds.has(event)) eventIds.set(event, `e${nextEventId++}`);
@@ -1068,9 +1069,9 @@
         <button class="wide" data-action="apply-bulk-type">应用到所选事件</button>
         <h4>BULK PROPS</h4>
         <label>属性名<input id="advBulkPropKey" value="${esc(bulkPropDraft.key)}" placeholder="landing_x_percent"></label>
-        <label>值表达式<input id="advBulkPropExpression" value="${esc(bulkPropDraft.expression)}" placeholder='x % 4 === 0 ? "beats/a.png" : null'></label>
+        <label>值表达式<input id="advBulkPropExpression" value="${esc(bulkPropDraft.expression)}" placeholder='x % 4 == 0 ? "beats/a.png" : null'></label>
         <button class="wide" data-action="apply-bulk-prop">计算并批量添加</button>
-        <p class="subtle">使用类 JavaScript 表达式：支持算术、比较、&amp;&amp;、||、!、三元条件“? :”、字符串拼接，以及 abs / round / floor / ceil / min / max / pow / sqrt / clamp。结果会保存为 number、string 或 boolean；null 表示该事件不修改。x / i 从 0 开始，n 从 1 开始，t 是事件时间（ms），count 是所选数量。</p>
+        <p class="subtle">由内置 math.js 计算：支持完整数学函数与常量、数组/矩阵、复数、单位、隐式乘法和三元条件“? :”。幂使用 ^，逻辑使用 and / or / not，比较使用 == / !=；也兼容 **、&amp;&amp;、||、===、!==。text(...) 可拼接字符串。最终结果须为 number、string、boolean 或 null；null 表示该事件不修改。x / i 从 0 开始，n 从 1 开始，t 是事件时间（ms），count 是所选数量。</p>
         <label>复制到轨道<select id="advCopyTarget">${timelineNames().map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}</select></label>
         <button class="wide" data-action="copy-to-track">按绝对时间复制</button>
         <p class="subtle">跨轨复制会保留时间、type 与 props；复制进 combat_line 时会自动补齐缺失 definition。</p></div>`;
@@ -1104,7 +1105,134 @@
     return text;
   }
 
+  function normalizeBulkMathSyntax(source) {
+    let result = "";
+    let quote = "";
+    let escaped = false;
+    for (let index = 0; index < source.length;) {
+      const char = source[index];
+      if (quote) {
+        result += char;
+        index++;
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === quote) quote = "";
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        result += char;
+        index++;
+        continue;
+      }
+      const replacements = [
+        ["!==", "!="], ["===", "=="], ["&&", " and "], ["||", " or "], ["**", "^"]
+      ];
+      const replacement = replacements.find(([token]) => source.startsWith(token, index));
+      if (replacement) {
+        result += replacement[1];
+        index += replacement[0].length;
+      } else {
+        result += char;
+        index++;
+      }
+    }
+    return result;
+  }
+
+  function getBulkMathRuntime() {
+    if (bulkMathRuntime) return bulkMathRuntime;
+    if (!window.math?.parse || !window.math?.import) throw Error("math.js 未加载，请刷新页面后重试");
+
+    const instance = window.math;
+    const parse = instance.parse.bind(instance);
+    const disabled = name => () => { throw Error(`批量表达式中禁用函数：${name}`); };
+    const scalarText = value => {
+      if (value === null) return "null";
+      if (["number", "string", "boolean", "bigint"].includes(typeof value)) return String(value);
+      if (instance.isBigNumber?.(value) || instance.isFraction?.(value)) return String(value);
+      if (instance.isComplex?.(value) && Number(value.im) === 0) return String(value.re);
+      throw Error("text(...) 只接受标量参数");
+    };
+
+    // math.js 官方安全建议：表达式环境不开放导入、单位定义、二次解析与符号变换。
+    instance.import({
+      import: disabled("import"),
+      createUnit: disabled("createUnit"),
+      reviver: disabled("reviver"),
+      evaluate: disabled("evaluate"),
+      parse: disabled("parse"),
+      compile: disabled("compile"),
+      parser: disabled("parser"),
+      simplify: disabled("simplify"),
+      derivative: disabled("derivative"),
+      resolve: disabled("resolve"),
+      text: (...values) => values.map(scalarText).join(""),
+      clamp: (value, minimum, maximum) => instance.min(maximum, instance.max(minimum, value))
+    }, { override: true });
+    bulkMathRuntime = { instance, parse };
+    return bulkMathRuntime;
+  }
+
+  function normalizeBulkMathResult(value, instance) {
+    if (value === null) return { matched: false };
+    if (typeof value === "string" || typeof value === "boolean") return { matched: true, value };
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw Error("表达式结果必须是有限数字");
+      return { matched: true, value };
+    }
+    if (typeof value === "bigint") {
+      const number = Number(value);
+      if (!Number.isSafeInteger(number)) throw Error("整数结果超出可安全保存范围");
+      return { matched: true, value: number };
+    }
+    if (instance.isBigNumber?.(value)) {
+      const number = value.toNumber();
+      if (!Number.isFinite(number)) throw Error("高精度数值结果超出可保存范围");
+      return { matched: true, value: number };
+    }
+    if (instance.isFraction?.(value)) {
+      const number = Number(value.valueOf());
+      if (!Number.isFinite(number)) throw Error("分数结果超出可保存范围");
+      return { matched: true, value: number };
+    }
+    if (instance.isComplex?.(value)) {
+      const real = Number(value.re);
+      if (Number(value.im) !== 0 || !Number.isFinite(real)) throw Error("复数结果不能直接保存为事件属性；请先取 re(...)、im(...)、abs(...) 等标量");
+      return { matched: true, value: real };
+    }
+    throw Error("表达式最终结果必须是 number、string、boolean 或 null；数组、矩阵和单位只能用于中间计算");
+  }
+
+  function compileMathBulkExpression(source) {
+    const text = String(source).trim();
+    if (!text) throw Error("值表达式不能为空");
+    if (text.length > 4096) throw Error("值表达式不能超过 4096 个字符");
+    const { instance, parse } = getBulkMathRuntime();
+    let node;
+    try {
+      node = parse(normalizeBulkMathSyntax(text));
+    } catch (error) {
+      throw Error(`表达式语法错误：${error.message || error}`);
+    }
+    node.traverse(child => {
+      if (["AssignmentNode", "FunctionAssignmentNode", "BlockNode"].includes(child.type)) {
+        throw Error("批量表达式不允许赋值、定义函数或多语句");
+      }
+    });
+    const compiled = node.compile();
+    return variables => {
+      try {
+        const scope = new Map(Object.entries(variables));
+        return normalizeBulkMathResult(compiled.evaluate(scope), instance);
+      } catch (error) {
+        throw Error(`表达式计算失败：${error.message || error}`);
+      }
+    };
+  }
+
   function compileBulkExpression(source) {
+    if (window.math?.parse && window.math?.import) return compileMathBulkExpression(source);
     const text = String(source).trim();
     if (!text) throw Error("值表达式不能为空");
     let position = 0;

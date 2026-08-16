@@ -22,7 +22,7 @@ Beat Track Studio 便携源码版
 - 检测结果不自动生成 Downbeat，所有节拍默认使用 normal_beat。
 - 新建或自动检测工程预置 normal_beat、empty_beat、weak_beat、strong_beat 定义；定义检查器可直接编辑 category（normal、weakbeat、downbeat）。
 - 可编辑、增加或删除节拍定义及其任意键值对。
-- 可逐个修改节拍定义，也可复选多个节拍后批量应用 type 或 props；批量 props 使用类 JavaScript 表达式，支持算术、比较、逻辑、三元条件、字符串拼接和常用数学函数，结果会逐项换算为 number、string 或 boolean，null 表示不修改该事件。
+- 可逐个修改节拍定义，也可复选多个节拍后批量应用 type 或 props；批量 props 由内置的完整 math.js 15.2.0 浏览器版计算，支持丰富的数学函数、常量和数据类型，结果会逐项换算为 number、string 或 boolean，null 表示不修改该事件。
 - 导出包包含 track.json、音频文件，以及可选的 disc.png。
 - 导出时自动把源音频转码为 OGG/Vorbis，track.json 的 sound_file 同步改为 .ogg。
 - 可编辑 version、author、BPM、difficulty、offset、playback_start_ms、总时长和 display_name；WAVEFORM 会遮罩起播位置之前的前段，以及实际音频超出 total_duration_ms 的尾段。
@@ -42,6 +42,70 @@ Beat Track Studio 便携源码版
 - 工程检查器覆盖全部 meta、settings、definitions、事件 props，并保留未知扩展键；definition 可编辑 texture、落点、提前生成时间、命中/匹配命中/未命中行为和旋转速度。
 - 高级编辑界面处于激活状态时均可使用常用快捷键（文字输入控件及 MIDI 弹窗除外）：Ctrl+Z/Y 撤销重做，Ctrl+C/X/V 复制剪切粘贴，Ctrl+D 重复，Delete 删除，Enter 创建，Space 播放；左右方向键移动 1 ms，Shift 为 10 ms，Ctrl 为 100 ms。
 
+批量 props 表达式：
+- 在高级编辑中复选多个事件后，可输入属性名和值表达式，再点击“计算并批量添加”。
+- x 和 i 是按轨道、时间排序后的 0 起始序号，n 是 1 起始序号，t 是事件时间（ms），count 是所选事件总数。
+- 使用 math.js 标准表达式语法：幂是 ^，逻辑运算是 and、or、not，比较是 ==、!=、<、<=、>、>=，条件表达式是“条件 ? 真值 : 假值”。
+- 为兼容已有公式，也接受 **、&&、||、===、!==；这些写法会在字符串以外转换为对应的 math.js 语法。
+- 支持 math.js 完整浏览器包中的函数、常量和运算类型，包括三角函数、对数、统计、组合数学、数组/矩阵、复数、分数、BigNumber、单位和隐式乘法；可使用自带的 clamp(value, min, max) 限制范围。
+- 字符串需要放在单引号或双引号中；使用 text(a, b, ...) 把多个标量拼接成字符串。
+- 表达式结果会直接写成 number、string 或 boolean，不会把公式文本写进 track.json；结果为 null 时不修改该事件已有的同名 prop。
+- 数组、矩阵、复数和单位可以参与中间计算，但最终必须得到可保存的标量。纯实数的 Complex、Fraction 和 BigNumber 会安全换算为普通 number；非实复数、矩阵、数组和单位不能直接作为 prop。
+- 为避免表达式修改计算环境，赋值、函数定义、多语句以及 import、createUnit、evaluate、parse、compile、parser、simplify、derivative、resolve、reviver 在批量表达式中禁用。
+
+示例：
+1. 按序号递增设置落点：
+   属性名：landing_x_percent
+   值表达式：20 + x * 10
+
+2. 把事件时间换算为整数秒：
+   属性名：second
+   值表达式：round(t / 1000)
+
+3. 每四个事件中的第 1、2 个使用不同贴图，其余事件保持原值：
+   属性名：texture
+   值表达式：x % 4 == 0 ? "beats/a.png" : x % 4 == 1 ? "beats/b.png" : null
+
+4. 根据序号自动拼接贴图路径：
+   属性名：texture
+   值表达式：text("beats/beat_", x % 4, ".png")
+
+5. 同时满足“偶数序号”和“前 30 秒”时允许攻击：
+   属性名：can_attack
+   值表达式：x % 2 == 0 and t < 30000
+
+6. 计算数值并限制在 0～100：
+   属性名：landing_x_percent
+   值表达式：clamp(round(20 + x * 7.5), 0, 100)
+
+7. 为前三个事件设置旋转速度，其余事件不修改：
+   属性名：rotation_rpm
+   值表达式：x < 3 ? 2^x * 15 : null
+
+8. 使用三角函数和常量生成周期数值：
+   属性名：wave
+   值表达式：round(50 + 50 sin(2 pi x / count))
+
+9. 使用统计函数从数组中计算标量：
+   属性名：average
+   值表达式：mean([x, n, count])
+
+10. 使用矩阵计算行列式：
+    属性名：determinant
+    值表达式：det([[x + 1, 2], [3, n]])
+
+11. 使用复数完成中间计算，再取可保存的模：
+    属性名：distance
+    值表达式：abs(complex(x, n))
+
+12. 把英寸换算为厘米数值：
+    属性名：length_cm
+    值表达式：number(2 inch, "cm")
+
+13. 继续使用旧的类 JavaScript 写法（兼容示例）：
+    属性名：can_attack
+    值表达式：x % 2 === 0 && t < 30000
+
 运行时能力提示：
 - 非 combat_line 命名轨以及 definition 的 haptic_intensity、particle、trigger 可以编辑和保存，但 DJCraft 当前仍未调度或消费这些预留能力。
 - definition 的 scale、texture、landing_x_percent、spawn_advance_ms、hit_behavior、matched_hit_behavior、miss_behavior、rotation_rpm 及同名事件 props 已用于 Falling beat 呈现。
@@ -49,6 +113,7 @@ Beat Track Studio 便携源码版
 目录说明：
 - webui_server.py：后端源码
 - webui/：前端源码
+- webui/vendor/mathjs/：随程序离线分发的 math.js 15.2.0 完整浏览器包及 Apache-2.0 许可证
 - runtime/：可迁移 Python 3.12 环境、Madmom 模型及全部依赖
 - run.bat：启动入口
 
